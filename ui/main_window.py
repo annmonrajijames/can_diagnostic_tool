@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QPushButton, QStackedWidget, QLabel
 )
 from threads.receiver_thread import CANReceiverThread
-from can_frame.frame_page import CANFramePage  # NEW IMPORT
+from can_frame.frame_page import CANFramePage
 
 class MainWindow(QMainWindow):
     def __init__(self, can_interface):
@@ -36,15 +36,14 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.home_page)
 
         # === Page 1: CAN Frame ===
-        self.can_frame_page = CANFramePage()
+        self.receiver_thread = CANReceiverThread(self.can_interface)
+        self.can_frame_page = CANFramePage(self.receiver_thread)
         self.pages.addWidget(self.can_frame_page)
 
         self.home_button.clicked.connect(lambda: self.pages.setCurrentWidget(self.home_page))
         self.can_frame_button.clicked.connect(lambda: self.pages.setCurrentWidget(self.can_frame_page))
 
         # === Receiver Thread ===
-        self.receiver_thread = CANReceiverThread(self.can_interface)
-        self.receiver_thread.frame_received.connect(self.can_frame_page.update_table)
         self.receiver_thread.start()
 
     def closeEvent(self, event):

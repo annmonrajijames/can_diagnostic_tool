@@ -27,6 +27,7 @@ A powerful, vendor-independent **desktop-based GUI application** for working wit
 - ✅ Modular and extensible architecture
 - ✅ Clean PySide6 UI with navigation across pages
 - ✅ Future-ready for any hardware vendor (supports plug-in drivers)
+- ✅ Batched frame updates with configurable refresh interval
 
 ---
 
@@ -82,3 +83,10 @@ can_diagnostic_tool/
 - cantools
 - pyqtgraph (for plotting)
 - pywin32 (for Windows GPS API)
+
+## Frame Update Batching
+
+Incoming CAN frames are collected in a background queue and applied to the table
+in batches. A timer (50 ms by default) controls how often queued frames are
+flushed to the UI. Pass a different `refresh_interval` when creating
+`CANFramePage` to tune the refresh rate.
