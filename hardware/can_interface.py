@@ -31,11 +31,11 @@ class CANInterface:
         frame.data = data
         return self.api.SBusCanSendMgs(frame)
 
-    def receive(self, timeout=10):
-        status, frame = self.api.SBusCanReadMgs(timeout)
+    def receive(self, timeout=10, max_msgs=10):
+        status, frames = self.api.SBusCanReadMgs(timeout, max_msgs)
         if status == 0:
-            return frame
-        return None
+            return frames
+        return []
 
     def set_filter(self, can_id):
         return self.api.SBusCanRxSetFilter(can_id)

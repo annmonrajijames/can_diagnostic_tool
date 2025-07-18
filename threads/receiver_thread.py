@@ -11,9 +11,9 @@ class CANReceiverThread(QThread):
 
     def run(self):
         while self._running:
-            # Block for up to 10 ms, return earlier if a frame is available
-            frame = self.can_interface.receive(timeout=10)
-            if frame:
+            # Block for up to 10 ms, return earlier if frames are available
+            frames = self.can_interface.receive(timeout=10, max_msgs=10)
+            for frame in frames:
                 self.frame_received.emit(frame)
 
     def stop(self):

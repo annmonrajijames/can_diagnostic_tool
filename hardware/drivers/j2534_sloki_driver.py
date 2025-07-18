@@ -134,20 +134,40 @@ class J2534API:
                                                      ctypes.byref(msgMask), ctypes.byref(msgPattern),
                                                      None, ctypes.byref(filterId))
 
-    def SBusCanReadMgs(self, timeout=0):
-        # Reads a CAN message from the hardware interface
-        CAN = 5
-        Rx_Msg = self.SMsg()
-        Rx_Msg.ProtocolID = CAN
-        num_msgs = ctypes.c_ulong(1)
-        status = self.j2534_dll.PassThruReadMsgs(self.channel_id, ctypes.byref(Rx_Msg), ctypes.byref(num_msgs), timeout)
+    def SBusCanReadMgs(self, timeout=0, max_msgs=10):
+        """Reads up to ``max_msgs`` CAN messages.
 
-        response = bytearray(Rx_Msg.Data)
-        frame = CANFrame()
-        frame.CAN_ID = (response[0] << 24) | (response[1] << 16) | (response[2] << 8) | response[3]
-        frame.DLC = Rx_Msg.DataSize - 4
-        frame.data = [response[4 + i] for i in range(frame.DLC)]
-        return status, frame
+        Parameters
+        ----------
+        timeout : int, optional
+            Time in milliseconds to wait for a frame.
+        max_msgs : int, optional
+            Maximum number of messages to read. Default is 10.
+
+        Returns
+        -------
+        tuple
+            (status, list[CANFrame])
+        """
+
+        CAN = 5
+        MsgArray = (self.SMsg * max_msgs)()
+        for msg in MsgArray:
+            msg.ProtocolID = CAN
+
+        num_msgs = ctypes.c_ulong(max_msgs)
+        status = self.j2534_dll.PassThruReadMsgs(self.channel_id, MsgArray, ctypes.byref(num_msgs), timeout)
+
+        frames = []
+        for i in range(num_msgs.value):
+            response = bytearray(MsgArray[i].Data)
+            frame = CANFrame()
+            frame.CAN_ID = (response[0] << 24) | (response[1] << 16) | (response[2] << 8) | response[3]
+            frame.DLC = MsgArray[i].DataSize - 4
+            frame.data = [response[4 + j] for j in range(frame.DLC)]
+            frames.append(frame)
+
+        return status, frames
 
     def SBusCanDisconnect(self):
         return self.j2534_dll.PassThruDisconnect(self.channel_id)

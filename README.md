@@ -82,3 +82,10 @@ can_diagnostic_tool/
 - cantools
 - pyqtgraph (for plotting)
 - pywin32 (for Windows GPS API)
+
+## Receiving Frames
+
+The receiver thread calls `CANInterface.receive()` which now accepts an optional
+`max_msgs` argument. The interface allocates space for multiple frames and
+returns a list of `CANFrame` objects for all messages read in one call. The
+thread iterates over this list and emits each frame individually to the UI.
