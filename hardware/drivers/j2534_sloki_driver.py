@@ -92,15 +92,18 @@ class J2534API:
         else:
             TxMsg.TxFlags = ISO15765_FRAME_PAD
 
-        # Construct data: [4-byte CAN_ID] + [8-byte payload]
+        # Construct data: [4-byte CAN_ID] + [payload up to DLC bytes]
         c_byte_array = (ctypes.c_ubyte * 4028)()
         CanFrame.CAN_ID = (CanFrame.CAN_ID & 0x1FFFFFFF)
         c_byte_array[0] = (CanFrame.CAN_ID >> 24)
         c_byte_array[1] = (CanFrame.CAN_ID >> 16)
         c_byte_array[2] = (CanFrame.CAN_ID >> 8)
         c_byte_array[3] = (CanFrame.CAN_ID >> 0)
-        for i in range(8):
+        for i in range(CanFrame.DLC):
             c_byte_array[4 + i] = CanFrame.data[i]
+        # Zero fill remaining bytes if DLC < 8
+        for i in range(CanFrame.DLC, 8):
+            c_byte_array[4 + i] = 0
 
         TxMsg.Data = c_byte_array
         return self.j2534_dll.PassThruWriteMsgs(self.channel_id, ctypes.byref(TxMsg), ctypes.byref(pNumMsgs), 0)
