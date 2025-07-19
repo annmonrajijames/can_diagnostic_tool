@@ -5,11 +5,13 @@
 # ------------------------------------------------------------
 
 import sys
+import logging
 from PySide6.QtWidgets import QApplication, QMessageBox
 from hardware.can_interface import CANInterface
 from ui.main_window import MainWindow
 
 def main():
+    logging.basicConfig(level=logging.INFO)
     app = QApplication(sys.argv)
 
     try:

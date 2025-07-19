@@ -7,6 +7,7 @@
 
 import ctypes
 import os
+import logging
 from enum import Enum
 import winreg
 
@@ -140,14 +141,30 @@ class J2534API:
         Rx_Msg = self.SMsg()
         Rx_Msg.ProtocolID = CAN
         num_msgs = ctypes.c_ulong(1)
-        status = self.j2534_dll.PassThruReadMsgs(self.channel_id, ctypes.byref(Rx_Msg), ctypes.byref(num_msgs), timeout)
+        try:
+            status = self.j2534_dll.PassThruReadMsgs(
+                self.channel_id,
+                ctypes.byref(Rx_Msg),
+                ctypes.byref(num_msgs),
+                timeout,
+            )
 
-        response = bytearray(Rx_Msg.Data)
-        frame = CANFrame()
-        frame.CAN_ID = (response[0] << 24) | (response[1] << 16) | (response[2] << 8) | response[3]
-        frame.DLC = Rx_Msg.DataSize - 4
-        frame.data = [response[4 + i] for i in range(frame.DLC)]
-        return status, frame
+            raw = bytes(Rx_Msg.Data[:int(Rx_Msg.DataSize)])
+            frame = CANFrame()
+            if len(raw) < 4:
+                return status, None
+            frame.CAN_ID = (
+                (raw[0] << 24)
+                | (raw[1] << 16)
+                | (raw[2] << 8)
+                | raw[3]
+            )
+            frame.DLC = int(Rx_Msg.DataSize) - 4
+            frame.data = list(raw[4:4 + frame.DLC])
+            return status, frame
+        except Exception:
+            logging.exception("Failed to read CAN message")
+            raise
 
     def SBusCanDisconnect(self):
         return self.j2534_dll.PassThruDisconnect(self.channel_id)
