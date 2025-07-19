@@ -134,20 +134,52 @@ class J2534API:
                                                      ctypes.byref(msgMask), ctypes.byref(msgPattern),
                                                      None, ctypes.byref(filterId))
 
-    def SBusCanReadMgs(self, timeout=0):
-        # Reads a CAN message from the hardware interface
-        CAN = 5
-        Rx_Msg = self.SMsg()
-        Rx_Msg.ProtocolID = CAN
-        num_msgs = ctypes.c_ulong(1)
-        status = self.j2534_dll.PassThruReadMsgs(self.channel_id, ctypes.byref(Rx_Msg), ctypes.byref(num_msgs), timeout)
+    def SBusCanReadMgs(self, timeout=0, num_msgs=1):
+        """Read one or more CAN messages from the hardware interface.
 
-        response = bytearray(Rx_Msg.Data)
-        frame = CANFrame()
-        frame.CAN_ID = (response[0] << 24) | (response[1] << 16) | (response[2] << 8) | response[3]
-        frame.DLC = Rx_Msg.DataSize - 4
-        frame.data = [response[4 + i] for i in range(frame.DLC)]
-        return status, frame
+        Parameters
+        ----------
+        timeout : int, optional
+            Time to wait for messages in milliseconds.
+        num_msgs : int, optional
+            Maximum number of messages to read in a single call.
+
+        Returns
+        -------
+        tuple
+            (status, [CANFrame, ...]) where ``status`` is the underlying driver
+            return code and the list contains all successfully read frames.
+        """
+
+        CAN = 5
+        RxArray = (self.SMsg * num_msgs)()
+        for msg in RxArray:
+            msg.ProtocolID = CAN
+
+        msgs_to_read = ctypes.c_ulong(num_msgs)
+        status = self.j2534_dll.PassThruReadMsgs(self.channel_id,
+                                                 RxArray,
+                                                 ctypes.byref(msgs_to_read),
+                                                 timeout)
+
+        frames = []
+        for i in range(msgs_to_read.value):
+            Rx_Msg = RxArray[i]
+            raw = bytes(Rx_Msg.Data[:Rx_Msg.DataSize])
+            if len(raw) < 4:
+                continue
+            frame = CANFrame()
+            frame.CAN_ID = (
+                (raw[0] << 24)
+                | (raw[1] << 16)
+                | (raw[2] << 8)
+                | raw[3]
+            )
+            frame.DLC = Rx_Msg.DataSize - 4
+            frame.data = [raw[4 + j] for j in range(frame.DLC)]
+            frames.append(frame)
+
+        return status, frames
 
     def SBusCanDisconnect(self):
         return self.j2534_dll.PassThruDisconnect(self.channel_id)
