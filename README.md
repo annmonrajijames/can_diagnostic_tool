@@ -82,3 +82,7 @@ can_diagnostic_tool/
 - cantools
 - pyqtgraph (for plotting)
 - pywin32 (for Windows GPS API)
+
+## Environment Variables
+
+- `SLOKI_DLL_PATH` – Optional override for the path to the Sloki `sBus-J2534.dll`. If not set, the driver defaults to `C:\Program Files (x86)\Sloki\SBUS\lib\x64\sBus-J2534.dll`.

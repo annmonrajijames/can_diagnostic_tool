@@ -23,9 +23,11 @@ class CANFrame:
 
 class J2534API:
     def __init__(self):
-        # --- NOTE: Hardcoded path for Sloki DLL. ---
-        # TODO: Future improvement: Load DLL path from config or allow user selection.
-        self.j2534_dll = ctypes.WinDLL(r'C:\Program Files (x86)\Sloki\SBUS\lib\x64\sBus-J2534.dll')
+        # Path to the Sloki J2534 DLL. Can be overridden via the
+        # ``SLOKI_DLL_PATH`` environment variable.
+        default_path = r'C:\Program Files (x86)\Sloki\SBUS\lib\x64\sBus-J2534.dll'
+        dll_path = os.getenv('SLOKI_DLL_PATH', default_path)
+        self.j2534_dll = ctypes.WinDLL(dll_path)
         self.device_id = ctypes.c_ulong()
         self.channel_id = ctypes.c_ulong()
 
