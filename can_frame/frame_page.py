@@ -65,3 +65,5 @@ class CANFramePage(QWidget):
         for can_id, row in self.can_id_to_row.items():
             self.frame_count[can_id] = 0
             self.table.setItem(row, 4, QTableWidgetItem("0"))
+        if hasattr(self, "can_interface") and hasattr(self.can_interface, "reset_rx_stats"):
+            self.can_interface.reset_rx_stats()

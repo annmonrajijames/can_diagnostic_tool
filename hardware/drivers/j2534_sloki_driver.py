@@ -7,6 +7,7 @@
 
 import ctypes
 import os
+import time
 from enum import Enum
 import winreg
 
@@ -28,6 +29,11 @@ class J2534API:
         self.j2534_dll = ctypes.WinDLL(r'C:\Program Files (x86)\Sloki\SBUS\lib\x64\sBus-J2534.dll')
         self.device_id = ctypes.c_ulong()
         self.channel_id = ctypes.c_ulong()
+        # RX statistics
+        self.total_rx = 0
+        self.rx_rate = 0
+        self._rx_sec_counter = 0
+        self._rx_sec_start = time.time()
 
     # C struct for CAN messages used by J2534 API
     class SMsg(ctypes.Structure):
@@ -154,3 +160,10 @@ class J2534API:
 
     def SBusCanClose(self):
         return self.j2534_dll.PassThruClose(self.device_id)
+
+    def reset_rx_stats(self):
+        """Reset internal RX statistics counters."""
+        self.total_rx = 0
+        self.rx_rate = 0
+        self._rx_sec_counter = 0
+        self._rx_sec_start = time.time()
