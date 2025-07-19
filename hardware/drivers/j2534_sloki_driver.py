@@ -6,9 +6,7 @@
 # ------------------------------------------------------------
 
 import ctypes
-import os
 from enum import Enum
-import winreg
 
 # Generic CAN frame structure
 class CANFrame:
