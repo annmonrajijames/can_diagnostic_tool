@@ -10,6 +10,7 @@ import os
 import logging
 from enum import Enum
 import winreg
+import time
 
 # Generic CAN frame structure
 class CANFrame:
@@ -29,6 +30,12 @@ class J2534API:
         self.j2534_dll = ctypes.WinDLL(r'C:\Program Files (x86)\Sloki\SBUS\lib\x64\sBus-J2534.dll')
         self.device_id = ctypes.c_ulong()
         self.channel_id = ctypes.c_ulong()
+
+        # Frame counting for debugging
+        self.total_rx = 0
+        self.rx_rate = 0
+        self._rx_sec_start = time.time()
+        self._rx_sec_counter = 0
 
     # C struct for CAN messages used by J2534 API
     class SMsg(ctypes.Structure):
@@ -161,6 +168,16 @@ class J2534API:
             )
             frame.DLC = int(Rx_Msg.DataSize) - 4
             frame.data = list(raw[4:4 + frame.DLC])
+
+            # Update frame counters
+            self.total_rx += 1
+            self._rx_sec_counter += 1
+            now = time.time()
+            if now - self._rx_sec_start >= 1.0:
+                self.rx_rate = self._rx_sec_counter
+                self._rx_sec_counter = 0
+                self._rx_sec_start = now
+
             return status, frame
         except Exception:
             logging.exception("Failed to read CAN message")
@@ -171,3 +188,8 @@ class J2534API:
 
     def SBusCanClose(self):
         return self.j2534_dll.PassThruClose(self.device_id)
+
+    # Debugging helper to fetch RX statistics
+    def get_rx_stats(self):
+        """Return total frames received and frames per second."""
+        return self.total_rx, self.rx_rate

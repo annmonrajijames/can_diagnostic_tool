@@ -7,8 +7,9 @@ from PySide6.QtCore import Qt
 import time
 
 class CANFramePage(QWidget):
-    def __init__(self):
+    def __init__(self, can_interface=None):
         super().__init__()
+        self.can_interface = can_interface
         self.layout = QVBoxLayout(self)
 
         self.status_label = QLabel("Connected to CAN Bus.")
@@ -33,11 +34,32 @@ class CANFramePage(QWidget):
         self.last_timestamp = {}
         self.frame_count = {}
 
+        # total frame counters for debugging
+        self.total_frames = 0
+        self._sec_start = time.time()
+        self._sec_counter = 0
+
     def update_table(self, frame):
         can_id = frame.CAN_ID
         dlc = frame.DLC
         data_str = " ".join([f"{b:02X}" for b in frame.data])
         now = time.time() * 1000  # ms
+
+        # Update overall counters
+        self.total_frames += 1
+        self._sec_counter += 1
+        sec_now = time.time()
+        if sec_now - self._sec_start >= 1.0:
+            ui_fps = self._sec_counter
+            driver_total = driver_rate = 0
+            if self.can_interface is not None:
+                driver_total, driver_rate = self.can_interface.get_rx_stats()
+            self.status_label.setText(
+                f"UI: {self.total_frames} frames / {ui_fps} fps | "
+                f"Driver: {driver_total} frames / {driver_rate} fps"
+            )
+            self._sec_counter = 0
+            self._sec_start = sec_now
 
         if can_id in self.can_id_to_row:
             row = self.can_id_to_row[can_id]
@@ -65,3 +87,7 @@ class CANFramePage(QWidget):
         for can_id, row in self.can_id_to_row.items():
             self.frame_count[can_id] = 0
             self.table.setItem(row, 4, QTableWidgetItem("0"))
+        self.total_frames = 0
+        self._sec_counter = 0
+        self._sec_start = time.time()
+        self.status_label.setText("Counters reset")

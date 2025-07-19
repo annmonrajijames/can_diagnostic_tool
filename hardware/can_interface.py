@@ -39,3 +39,6 @@ class CANInterface:
 
     def set_filter(self, can_id):
         return self.api.SBusCanRxSetFilter(can_id)
+
+    def get_rx_stats(self):
+        return self.api.get_rx_stats()

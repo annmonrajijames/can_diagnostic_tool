@@ -36,7 +36,7 @@ class MainWindow(QMainWindow):
         self.pages.addWidget(self.home_page)
 
         # === Page 1: CAN Frame ===
-        self.can_frame_page = CANFramePage()
+        self.can_frame_page = CANFramePage(self.can_interface)
         self.pages.addWidget(self.can_frame_page)
 
         self.home_button.clicked.connect(lambda: self.pages.setCurrentWidget(self.home_page))
