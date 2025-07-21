@@ -6,7 +6,6 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton,
     QFileDialog, QLineEdit, QMessageBox, QComboBox
 )
-from hardware.driver_loader import J2534Driver, J2534Error
 
 CONFIG_PATH = Path("config.json")
 
@@ -36,11 +35,6 @@ class HardwarePage(QWidget):
         self.layout().addWidget(QLabel("Select Baudrate:"))
         self.layout().addWidget(self.baudrate_input)
 
-        # Test Connection Button
-        self.test_button = QPushButton("Test Connection")
-        self.test_button.clicked.connect(self.test_connection)
-        self.layout().addWidget(self.test_button)
-
         # Save Config Button
         self.save_button = QPushButton("Save Configuration")
         self.save_button.clicked.connect(self.save_path)
@@ -57,20 +51,6 @@ class HardwarePage(QWidget):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select J2534 DLL", "", "DLL Files (*.dll)")
         if file_path:
             self.dll_path_input.setText(file_path)
-
-    def test_connection(self):
-        path = self.dll_path_input.text().strip()
-        baudrate = int(self.baudrate_input.currentText())
-
-        try:
-            driver = J2534Driver(path)
-            driver.open()
-            driver.connect(baudrate=baudrate)
-            driver.disconnect()
-            self.status_label.setText("✅ DLL loaded and connection successful.")
-        except (FileNotFoundError, J2534Error) as e:
-            QMessageBox.critical(self, "Connection Failed", str(e))
-            self.status_label.setText("❌ Connection failed.")
 
     def save_path(self):
         path = self.dll_path_input.text().strip()
@@ -98,7 +78,6 @@ class HardwarePage(QWidget):
 
                     self.dll_path_input.setText(dll_path)
 
-                    # Use safe comparison to set baudrate
                     if baudrate in [self.baudrate_input.itemText(i) for i in range(self.baudrate_input.count())]:
                         self.baudrate_input.setCurrentText(baudrate)
 
