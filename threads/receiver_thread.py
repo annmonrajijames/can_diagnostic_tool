@@ -11,10 +11,11 @@ class CANReceiverThread(QThread):
 
     def run(self):
         while self._running:
-            # Block for up to 10 ms, return earlier if a frame is available
-            frame = self.can_interface.receive(timeout=10)
-            if frame:
+            frames = self.can_interface.receive_batch(timeout=1, max_frames=50)
+            for frame in frames:
                 self.frame_received.emit(frame)
+            # Short delay to prevent busy waiting
+            self.msleep(1)
 
     def stop(self):
         self._running = False
