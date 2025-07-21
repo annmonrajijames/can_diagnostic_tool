@@ -95,8 +95,12 @@ class HardwarePage(QWidget):
                     config = json.load(f)
                     dll_path = config.get("dll_path", "")
                     baudrate = str(config.get("baudrate", "500000"))
+
                     self.dll_path_input.setText(dll_path)
-                    if baudrate in self.baudrate_input.model().stringList():
+
+                    # Use safe comparison to set baudrate
+                    if baudrate in [self.baudrate_input.itemText(i) for i in range(self.baudrate_input.count())]:
                         self.baudrate_input.setCurrentText(baudrate)
+
             except Exception as e:
                 self.status_label.setText(f"⚠️ Failed to load config: {e}")
