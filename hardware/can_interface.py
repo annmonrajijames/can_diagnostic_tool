@@ -17,6 +17,8 @@ class CANInterface:
         self._stats_start = time.time()
         self._frames_received = 0
         self._load_driver_from_config()
+        # ensure current_baudrate reflects the value from config.json
+        self.current_baudrate = self.default_baudrate
 
     def _load_driver_from_config(self):
         if not CONFIG_PATH.exists():
@@ -40,7 +42,7 @@ class CANInterface:
         baudrate = baudrate or self.default_baudrate
         self.current_baudrate = baudrate
         print(f"[DEBUG] Connecting with baudrate: {baudrate}")
-        print("[DEBUG] Network statistics will be displayed every second")
+        print("[DEBUG] Network statistics will be displayed every second (frames/min)")
 
         self._stats_start = time.time()
         self._frames_received = 0
@@ -70,8 +72,9 @@ class CANInterface:
                 elapsed = time.time() - self._stats_start
                 if elapsed >= 1:
                     fps = self._frames_received / elapsed
+                    fpm = fps * 60
                     print(
-                        f"[DEBUG] {fps:.1f} frames/s at {self.current_baudrate} baud"
+                        f"[DEBUG] {fpm:.1f} frames/min at {self.current_baudrate} baud"
                     )
                     self._frames_received = 0
                     self._stats_start = time.time()
