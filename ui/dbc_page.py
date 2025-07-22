@@ -32,7 +32,9 @@ class DBCDecodePage(QWidget):
         layout.addWidget(self.table)
 
     def load_dbc(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "Select DBC file", "", "DBC Files (*.dbc);;All Files (*)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select DBC file", "", "DBC Files (*.dbc);;All Files (*)"
+        )
         if file_path:
             try:
                 with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
@@ -41,16 +43,26 @@ class DBCDecodePage(QWidget):
                 import re
 
                 # Strip completely malformed message blocks.
-                invalid_block = re.compile(r"^BO_\s+\d+\s*:\s*\d+\s+\S+(?:\n\s+SG_.*)*", re.MULTILINE)
+                invalid_block = re.compile(
+                    r"^BO_\s+\d+\s*:\s*\d+\s+\S+(?:\n\s+SG_.*)*",
+                    re.MULTILINE,
+                )
                 text = invalid_block.sub("", text)
 
-                # Normalize message names and ensure extended flag for long IDs.
-                pattern = re.compile(r"^(BO_\s+)(\d+)\s+([^:]+):\s*(\d+)\s+(\S+)", re.MULTILINE)
+                # Normalize message names and temporarily set the extended flag
+                # for IDs that exceed 11 bits so cantools can parse them.
+                pattern = re.compile(
+                    r"^(BO_\s+)(\d+)\s+([^:]+):\s*(\d+)\s+(\S+)",
+                    re.MULTILINE,
+                )
+
+                added_extended = set()
 
                 def fix(match: re.Match) -> str:
                     prefix, frame_id, name, dlc, node = match.groups()
                     fid = int(frame_id)
                     if fid > 0x7FF and fid < 0x80000000:
+                        added_extended.add(fid | 0x80000000)
                         fid |= 0x80000000
                     name = name.replace(" ", "_")
                     return f"{prefix}{fid} {name}: {dlc} {node}"
@@ -58,6 +70,14 @@ class DBCDecodePage(QWidget):
                 text = pattern.sub(fix, text)
 
                 self.db = cantools.database.load_string(text, strict=False)
+
+                # Restore original frame IDs for messages we flagged and mark
+                # them as extended so incoming CAN frames match.
+                for message in self.db.messages:
+                    if message.frame_id in added_extended:
+                        message.frame_id &= 0x1FFFFFFF
+                        message.is_extended_frame = True
+
                 self.status_label.setText(f"Loaded: {file_path}")
                 self.signal_to_row.clear()
                 self.table.setRowCount(0)
