@@ -16,6 +16,8 @@ A powerful, vendor-independent **desktop-based GUI application** for working wit
 
 - ✅ Live reception of raw CAN frames
 - ✅ DBC file upload and decoding to human-readable signals
+ - ✅ Handles non-standard DBC files (sanitizes IDs and names)
+ - ✅ Recovers extended identifiers so all signals decode
 - ✅ Real-time display of up to 200+ parameters
 - ✅ Keyword-based parameter search
 - ✅ Select/Deselect signals to monitor
@@ -26,6 +28,7 @@ A powerful, vendor-independent **desktop-based GUI application** for working wit
 - ✅ System timestamp, GPS (latitude/longitude) fetch
 - ✅ Modular and extensible architecture
 - ✅ Clean PySide6 UI with navigation across pages
+- ✅ Dedicated page for real-time decoded parameters
 - ✅ Future-ready for any hardware vendor (supports plug-in drivers)
 
 ---
@@ -37,7 +40,8 @@ can_diagnostic_tool/
 │
 ├── ui/                           # GUI layout & navigation
 │   ├── __init__.py
-│   └── main_window.py            # Home page + stacked pages
+│   ├── main_window.py            # Home page + stacked pages
+│   └── dbc_page.py              # Real-time decoded parameters
 │
 ├── can_frame/                    # “CAN Frame” feature module
 │   ├── __init__.py
