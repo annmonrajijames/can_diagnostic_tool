@@ -35,7 +35,29 @@ class DBCDecodePage(QWidget):
         file_path, _ = QFileDialog.getOpenFileName(self, "Select DBC file", "", "DBC Files (*.dbc);;All Files (*)")
         if file_path:
             try:
-                self.db = cantools.database.load_file(file_path, strict=False)
+                with open(file_path, "r", encoding="utf-8", errors="ignore") as f:
+                    text = f.read()
+
+                import re
+
+                # Strip completely malformed message blocks.
+                invalid_block = re.compile(r"^BO_\s+\d+\s*:\s*\d+\s+\S+(?:\n\s+SG_.*)*", re.MULTILINE)
+                text = invalid_block.sub("", text)
+
+                # Normalize message names and ensure extended flag for long IDs.
+                pattern = re.compile(r"^(BO_\s+)(\d+)\s+([^:]+):\s*(\d+)\s+(\S+)", re.MULTILINE)
+
+                def fix(match: re.Match) -> str:
+                    prefix, frame_id, name, dlc, node = match.groups()
+                    fid = int(frame_id)
+                    if fid > 0x7FF and fid < 0x80000000:
+                        fid |= 0x80000000
+                    name = name.replace(" ", "_")
+                    return f"{prefix}{fid} {name}: {dlc} {node}"
+
+                text = pattern.sub(fix, text)
+
+                self.db = cantools.database.load_string(text, strict=False)
                 self.status_label.setText(f"Loaded: {file_path}")
                 self.signal_to_row.clear()
                 self.table.setRowCount(0)
