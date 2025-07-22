@@ -1,41 +1,58 @@
-# can_interface.py
-# ------------------------------------------------------------
-# This file acts as a generic high-level wrapper for CAN communication
-# using a specific vendor driver (e.g., J2534 Sloki).
-# This allows future replacement with any other hardware backend.
-# ------------------------------------------------------------
+# hardware/can_interface.py
 
-from hardware.drivers.j2534_sloki_driver import J2534API, CANFrame
+import json
+from pathlib import Path
+from hardware.driver_loader import J2534Driver, CANFrame
+
+CONFIG_PATH = Path("config.json")
+
 
 class CANInterface:
-    def __init__(self, baudrate=500000):
-        self.api = J2534API()
-        self.protocol = J2534API.Protocol_ID.CAN
-        self.baudrate = baudrate
+    def __init__(self):
+        self.driver = None
+        self.dll_path = None
+        self.default_baudrate = 500000
+        self._load_driver_from_config()
 
-    def connect(self):
-        if self.api.SBusCanOpen() != 0:
-            raise ConnectionError("Failed to open CAN device")
-        if self.api.SBusCanConnect(self.protocol.value, self.baudrate) != 0:
-            raise ConnectionError("Failed to connect to CAN bus")
-        self.api.SBusCanClearRxMsg()
+    def _load_driver_from_config(self):
+        if not CONFIG_PATH.exists():
+            raise FileNotFoundError("⚠️ config.json not found. Please configure hardware first.")
+
+        with open(CONFIG_PATH, "r") as f:
+            config = json.load(f)
+
+        self.dll_path = config.get("dll_path", "")
+        self.default_baudrate = config.get("baudrate", 500000)
+
+        if not self.dll_path or not Path(self.dll_path).is_file():
+            raise FileNotFoundError(f"⚠️ DLL path invalid or not found: {self.dll_path}")
+
+        self.driver = J2534Driver(self.dll_path)
+
+    def connect(self, baudrate=None):
+        if not self.driver:
+            raise Exception("⚠️ Driver not initialized.")
+
+        baudrate = baudrate or self.default_baudrate
+
+        self.driver.open()
+        self.driver.connect(baudrate=baudrate)
 
     def disconnect(self):
-        self.api.SBusCanDisconnect()
-        self.api.SBusCanClose()
+        if self.driver:
+            self.driver.disconnect()
 
-    def transmit(self, can_id, data):
+    def send(self, can_id, data):
+        if not self.driver:
+            raise Exception("⚠️ Driver not connected.")
+
         frame = CANFrame()
         frame.CAN_ID = can_id
         frame.DLC = len(data)
         frame.data = data
-        return self.api.SBusCanSendMgs(frame)
+        return self.driver.send(frame)
 
     def receive(self, timeout=10):
-        status, frame = self.api.SBusCanReadMgs(timeout)
-        if status == 0:
-            return frame
+        if self.driver:
+            return self.driver.read(timeout)
         return None
-
-    def set_filter(self, can_id):
-        return self.api.SBusCanRxSetFilter(can_id)
