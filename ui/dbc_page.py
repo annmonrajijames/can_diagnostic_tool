@@ -42,45 +42,42 @@ class DBCDecodePage(QWidget):
 
                 import re
 
-                # Strip completely malformed message blocks.
-                invalid_block = re.compile(
-                    r"^BO_\s+\d+\s*:\s*\d+\s+\S+(?:\n\s+SG_.*)*",
+                # Strip completely malformed placeholder blocks.
+                junk = re.compile(
+                    r"^BO_\s+\d+\s*:\s*0\s+\S+(?:\n\s+SG_.*)*",
                     re.MULTILINE,
                 )
-                text = invalid_block.sub("", text)
+                text = junk.sub("", text)
 
-                # Normalize message names and temporarily set the extended flag
-                # for IDs that exceed 11 bits so cantools can parse them.
+                text = text.replace(">>!<<", "")
+
+                # Normalize message names and temporarily flag extended IDs so
+                # cantools can parse them properly.
                 pattern = re.compile(
                     r"^(BO_\s+)(\d+)\s+([^:]+):\s*(\d+)\s+(\S+)",
                     re.MULTILINE,
                 )
 
-                added_extended = set()
+                added = {}
 
                 def fix(match: re.Match) -> str:
-                    prefix, frame_id, name, dlc, node = match.groups()
-                    fid = int(frame_id)
-                    if fid > 0x7FF and fid < 0x80000000:
-                        added_extended.add(fid | 0x80000000)
-                        fid |= 0x80000000
-                    name = name.replace(" ", "_")
+                    prefix, fid, name, dlc, node = match.groups()
+                    fid_int = int(fid)
+                    if fid_int > 0x7FF and fid_int < 0x80000000:
+                        added[fid_int | 0x80000000] = fid_int
+                        fid = str(fid_int | 0x80000000)
+                    name = name.strip().replace(" ", "_")
                     return f"{prefix}{fid} {name}: {dlc} {node}"
 
                 text = pattern.sub(fix, text)
 
                 self.db = cantools.database.load_string(text, strict=False)
 
-                # Restore original frame IDs for messages we flagged and ensure
-                # extended identifiers keep the 0x80000000 bit so lookups work
+                # Restore original frame IDs for messages we flagged.
                 for message in self.db.messages:
-                    fid = message.frame_id
-                    if (fid | 0x80000000) in added_extended:
-                        message.frame_id = fid & 0x1FFFFFFF
+                    if message.frame_id in added:
+                        message.frame_id = added[message.frame_id]
                         message.is_extended_frame = True
-                    elif message.is_extended_frame and fid < 0x80000000:
-                        # cantools strips the extended flag bit; add it back
-                        message.frame_id = fid | 0x80000000
 
                 self.status_label.setText(f"Loaded: {file_path}")
                 self.signal_to_row.clear()
