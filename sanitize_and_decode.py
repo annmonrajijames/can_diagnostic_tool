@@ -4,7 +4,7 @@
 import re
 import csv
 
-# === adjust this if your DBC moves ===
+# Paths — adjust if needed
 DBC_PATH   = r"C:\Users\annmo\Downloads\DBC_sample.dbc"
 OUTPUT_CSV = r"C:\Users\annmo\Downloads\signals.csv"
 
@@ -20,36 +20,50 @@ _sg_re = re.compile(
 )
 
 def sanitize(name: str) -> str:
+    """Replace non-alphanumeric chars with underscores."""
     return re.sub(r'[^A-Za-z0-9_]', '_', name)
+
+def format_pcan_id(can_id: int) -> str:
+    """
+    Format CAN ID like PCAN‑View:
+    - Standard (0x000–0x7FF): 3 uppercase hex digits
+    - Extended (>0x7FF): 8 uppercase hex digits
+    """
+    if can_id <= 0x7FF:
+        return f"{can_id:03X}"
+    else:
+        return f"{can_id:08X}"
 
 def parse_dbc(path):
     signals = []
-    msg_id   = None
-    msg_name = None
+    current_msg = None
 
     with open(path, 'r', encoding='utf-8', errors='ignore') as f:
         for line in f:
             m = _bo_re.match(line)
             if m:
-                msg_id   = m.group(1)
-                msg_name = sanitize(m.group(2))
+                dbc_id    = int(m.group(1))
+                # mask off the extended-frame flag (0x80000000)
+                can_id    = dbc_id & 0x1FFFFFFF
+                msg_name  = sanitize(m.group(2))
+                current_msg = (format_pcan_id(can_id), msg_name)
                 continue
 
             s = _sg_re.match(line)
-            if s and msg_id is not None:
-                sig = [
+            if s and current_msg:
+                msg_id, msg_name = current_msg
+                signals.append([
                     msg_id,
                     msg_name,
-                    sanitize(s.group(1)),
-                    s.group(2),  # start
-                    s.group(3),  # length
+                    sanitize(s.group(1)),        # signal name
+                    s.group(2),                  # start bit
+                    s.group(3),                  # length
                     "big" if s.group(4) == "1" else "little",
-                    (s.group(5) == "-"),
-                    s.group(6),  # scale
-                    s.group(7),  # offset
-                    s.group(8),  # unit
-                ]
-                signals.append(sig)
+                    (s.group(5) == "-"),         # signed?
+                    s.group(6),                  # scale
+                    s.group(7),                  # offset
+                    s.group(8)                   # unit
+                ])
 
     return signals
 
