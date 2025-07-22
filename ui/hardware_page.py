@@ -32,6 +32,8 @@ class HardwarePage(QWidget):
         self.baudrate_input = QComboBox()
         self.baudrate_input.addItems(["125000", "250000", "500000", "1000000"])
         self.baudrate_input.setCurrentText("500000")
+        self._current_baudrate = self.baudrate_input.currentText()
+        self.baudrate_input.currentTextChanged.connect(self.on_baudrate_change)
         self.layout().addWidget(QLabel("Select Baudrate:"))
         self.layout().addWidget(self.baudrate_input)
 
@@ -83,3 +85,9 @@ class HardwarePage(QWidget):
 
             except Exception as e:
                 self.status_label.setText(f"⚠️ Failed to load config: {e}")
+
+    def on_baudrate_change(self, new_baudrate):
+        print(
+            f"[DEBUG] Baudrate changed from {self._current_baudrate} to {new_baudrate}"
+        )
+        self._current_baudrate = new_baudrate

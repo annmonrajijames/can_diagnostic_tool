@@ -34,6 +34,7 @@ class CANInterface:
             raise Exception("⚠️ Driver not initialized.")
 
         baudrate = baudrate or self.default_baudrate
+        print(f"[DEBUG] Connecting with baudrate: {baudrate}")
 
         self.driver.open()
         self.driver.connect(baudrate=baudrate)
