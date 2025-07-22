@@ -16,7 +16,8 @@ A powerful, vendor-independent **desktop-based GUI application** for working wit
 
 - ✅ Live reception of raw CAN frames
 - ✅ DBC file upload and decoding to human-readable signals
-- ✅ Handles non-standard DBC files (sanitizes IDs and names)
+ - ✅ Handles non-standard DBC files (sanitizes IDs and names)
+ - ✅ Recovers extended identifiers so all signals decode
 - ✅ Real-time display of up to 200+ parameters
 - ✅ Keyword-based parameter search
 - ✅ Select/Deselect signals to monitor

@@ -71,12 +71,16 @@ class DBCDecodePage(QWidget):
 
                 self.db = cantools.database.load_string(text, strict=False)
 
-                # Restore original frame IDs for messages we flagged and mark
-                # them as extended so incoming CAN frames match.
+                # Restore original frame IDs for messages we flagged and ensure
+                # extended identifiers keep the 0x80000000 bit so lookups work
                 for message in self.db.messages:
-                    if message.frame_id in added_extended:
-                        message.frame_id &= 0x1FFFFFFF
+                    fid = message.frame_id
+                    if (fid | 0x80000000) in added_extended:
+                        message.frame_id = fid & 0x1FFFFFFF
                         message.is_extended_frame = True
+                    elif message.is_extended_frame and fid < 0x80000000:
+                        # cantools strips the extended flag bit; add it back
+                        message.frame_id = fid | 0x80000000
 
                 self.status_label.setText(f"Loaded: {file_path}")
                 self.signal_to_row.clear()
