@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 from hardware.driver_loader import J2534Driver, CANFrame
+import time
 
 CONFIG_PATH = Path("config.json")
 
@@ -12,6 +13,9 @@ class CANInterface:
         self.driver = None
         self.dll_path = None
         self.default_baudrate = 500000
+        self.current_baudrate = self.default_baudrate
+        self._stats_start = time.time()
+        self._frames_received = 0
         self._load_driver_from_config()
 
     def _load_driver_from_config(self):
@@ -34,7 +38,12 @@ class CANInterface:
             raise Exception("⚠️ Driver not initialized.")
 
         baudrate = baudrate or self.default_baudrate
+        self.current_baudrate = baudrate
         print(f"[DEBUG] Connecting with baudrate: {baudrate}")
+        print("[DEBUG] Network statistics will be displayed every second")
+
+        self._stats_start = time.time()
+        self._frames_received = 0
 
         self.driver.open()
         self.driver.connect(baudrate=baudrate)
@@ -55,5 +64,16 @@ class CANInterface:
 
     def receive(self, timeout=10):
         if self.driver:
-            return self.driver.read(timeout)
+            frame = self.driver.read(timeout)
+            if frame:
+                self._frames_received += 1
+                elapsed = time.time() - self._stats_start
+                if elapsed >= 1:
+                    fps = self._frames_received / elapsed
+                    print(
+                        f"[DEBUG] {fps:.1f} frames/s at {self.current_baudrate} baud"
+                    )
+                    self._frames_received = 0
+                    self._stats_start = time.time()
+            return frame
         return None
