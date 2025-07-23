@@ -58,7 +58,7 @@ def parse_dbc(path):
                     sanitize(s.group(1)),        # signal name
                     s.group(2),                  # start bit
                     s.group(3),                  # length
-                    "big" if s.group(4) == "1" else "little",
+                    "little" if s.group(4) == "1" else "big",   # 1 = Intel (little‑endian), 0 = Motorola (big‑endian)
                     (s.group(5) == "-"),         # signed?
                     s.group(6),                  # scale
                     s.group(7),                  # offset
