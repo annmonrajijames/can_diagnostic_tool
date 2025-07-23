@@ -1,85 +1,127 @@
 #!/usr/bin/env python3
-# Clean_dbc.py
+# clean_dbc.py  –  parse a DBC and dump an enriched signal table to CSV-UTF8
+#
+# Columns captured
+# ────────────────
+# msg_id, msg_name, frame_type, dlc, msg_comment,
+# sig_name, mode, start, length, byte_order, is_signed,
+# scale, offset, min, max, unit, sig_comment
+#
+# ‼️  No external libraries are required.
 
 import re
 import csv
+from pathlib import Path
 
-# Paths — adjust if needed
-DBC_PATH   = r"C:\Users\annmo\Downloads\DBC_sample.dbc"
-OUTPUT_CSV = r"C:\Users\annmo\Downloads\signals.csv"
+# ── USER PATHS ──────────────────────────────────────────────────────────────
+DBC_PATH   = Path(r"C:\Users\annmo\Downloads\DBC_sample.dbc")
+OUTPUT_CSV = Path(r"C:\Users\annmo\Downloads\signals.csv")
+# ────────────────────────────────────────────────────────────────────────────
 
-# BO_  <id>  <name> : <dlc> <node>
-_bo_re = re.compile(r'^BO_\s*(\d+)\s+(\S+)\s*:')
-# SG_  <name> : <start_bit>|<length>@<endianness><sign> (<scale>,<offset>) [<min>|<max>] "<unit>"
+# ── REGEXES ─────────────────────────────────────────────────────────────────
+# Message definition:  BO_ <id> <name> : <dlc> <nodes…>
+_bo_re = re.compile(r'^BO_\s*(\d+)\s+(\S+)\s*:\s*(\d+)\s+(.+)$')
+
+# Signal definition (incl. optional multiplex mode, min/max, unit)
 _sg_re = re.compile(
-    r'^\s+SG_\s+(\S+)\s*:\s*'
-    r'(\d+)\|(\d+)@([01])([+-])\s*'
-    r'\(\s*([0-9eE\.\-+]+)\s*,\s*([0-9eE\.\-+]+)\s*\)\s*'
-    r'\[[^\]]*\]\s*'
-    r'"([^"]*)"'
+    r'^\s+SG_\s+(\S+)'                # 1  signal name
+    r'(?:\s+([Mm]\d*))?\s*'           # 2  multiplex info (M / m0 / m1 …) (optional)
+    r':\s*(\d+)\|(\d+)@([01])([+-])'  # 3-6 start, length, endian, sign
+    r'\s*\(\s*([0-9eE.+-]+)\s*,\s*([0-9eE.+-]+)\s*\)'  # 7-8 scale, offset
+    r'\s*\[\s*([0-9eE.+-]*)\s*\|\s*([0-9eE.+-]*)\s*\]'  # 9-10 min, max (may be blank)
+    r'\s*"([^"]*)"'                   # 11 unit
 )
 
+# Comments
+_cm_msg = re.compile(r'^CM_\s+BO_\s+(\d+)\s+"([^"]+)"')
+_cm_sig = re.compile(r'^CM_\s+SG_\s+(\d+)\s+(\S+)\s+"([^"]+)"')
+
+# ── HELPERS ────────────────────────────────────────────────────────────────
 def sanitize(name: str) -> str:
-    """Replace non-alphanumeric chars with underscores."""
+    """Replace non-alphanumerics with underscores for safe CSV / filenames."""
     return re.sub(r'[^A-Za-z0-9_]', '_', name)
 
 def format_pcan_id(can_id: int) -> str:
-    """
-    Format CAN ID like PCAN‑View:
-    - Standard (0x000–0x7FF): 3 uppercase hex digits
-    - Extended (>0x7FF): 8 uppercase hex digits
-    """
-    if can_id <= 0x7FF:
-        return f"{can_id:03X}"
-    else:
-        return f"{can_id:08X}"
+    """PCAN-View style: 3-hex for standard, 8-hex for extended."""
+    return f"{can_id:03X}" if can_id <= 0x7FF else f"{can_id:08X}"
 
-def parse_dbc(path):
-    signals = []
-    current_msg = None
-
-    with open(path, 'r', encoding='utf-8', errors='ignore') as f:
+# ── STEP 1: COLLECT COMMENTS (1st pass) ─────────────────────────────────────
+def collect_comments(path: Path):
+    msg_comments = {}                    # id → comment
+    sig_comments = {}                    # (id, sig_name) → comment
+    with path.open(encoding='utf-8', errors='ignore') as f:
         for line in f:
-            m = _bo_re.match(line)
-            if m:
-                dbc_id    = int(m.group(1))
-                # mask off the extended-frame flag (0x80000000)
-                can_id    = dbc_id & 0x1FFFFFFF
-                msg_name  = sanitize(m.group(2))
-                current_msg = (format_pcan_id(can_id), msg_name)
+            if m := _cm_msg.match(line):
+                msg_comments[int(m.group(1))] = m.group(2)
+            elif s := _cm_sig.match(line):
+                sig_comments[(int(s.group(1)), s.group(2))] = s.group(3)
+    return msg_comments, sig_comments
+
+# ── STEP 2: PARSE MAIN STRUCTURE (2nd pass) ────────────────────────────────
+def parse_dbc(path: Path, msg_comments, sig_comments):
+    """
+    Returns list[ list[str] ] – one row per signal with all required columns.
+    """
+    rows = []
+    current_msg = None            # dict holding current BO_ fields
+
+    with path.open(encoding='utf-8', errors='ignore') as f:
+        for line in f:
+            if m := _bo_re.match(line):
+                dbc_id  = int(m.group(1))
+                can_id  = dbc_id & 0x1FFFFFFF
+                frame_t = "extended" if dbc_id & 0x80000000 else "standard"
+                current_msg = {
+                    "dbc_id"    : dbc_id,
+                    "id"        : format_pcan_id(can_id),
+                    "name"      : sanitize(m.group(2)),
+                    "dlc"       : int(m.group(3)),
+                    "frame_type": frame_t,
+                    "comment"   : msg_comments.get(dbc_id, "")
+                }
                 continue
 
-            s = _sg_re.match(line)
-            if s and current_msg:
-                msg_id, msg_name = current_msg
-                signals.append([
-                    msg_id,
-                    msg_name,
-                    sanitize(s.group(1)),        # signal name
-                    s.group(2),                  # start bit
-                    s.group(3),                  # length
-                    "little" if s.group(4) == "1" else "big",   # 1 = Intel (little‑endian), 0 = Motorola (big‑endian)
-                    (s.group(5) == "-"),         # signed?
-                    s.group(6),                  # scale
-                    s.group(7),                  # offset
-                    s.group(8)                   # unit
+            if s := _sg_re.match(line):
+                if current_msg is None:
+                    continue  # malformed DBC: SG_ before any BO_
+                sig_name = s.group(1)
+                rows.append([
+                    current_msg["id"],                       # msg_id
+                    current_msg["name"],                     # msg_name
+                    current_msg["frame_type"],               # frame_type
+                    current_msg["dlc"],                      # dlc
+                    current_msg["comment"],                  # msg_comment
+                    sanitize(sig_name),                      # sig_name
+                    s.group(2) or "",                        # mode ('' if none)
+                    s.group(3),                              # start bit
+                    s.group(4),                              # length
+                    "little" if s.group(5) == "1" else "big",# byte_order
+                    (s.group(6) == "-"),                     # is_signed (bool)
+                    s.group(7),                              # scale
+                    s.group(8),                              # offset
+                    s.group(9),                              # min
+                    s.group(10),                             # max
+                    s.group(11),                             # unit
+                    sig_comments.get((current_msg["dbc_id"], sig_name), "")
                 ])
 
-    return signals
+    return rows
 
-def write_csv(signals, out_path):
+# ── STEP 3: WRITE CSV (UTF-8 with BOM) ─────────────────────────────────────
+def write_csv(rows, out_path: Path):
     header = [
-        'msg_id','msg_name','sig_name',
-        'start','length','byte_order',
-        'is_signed','scale','offset','unit'
+        'msg_id','msg_name','frame_type','dlc','msg_comment',
+        'sig_name','mode','start','length','byte_order','is_signed',
+        'scale','offset','min','max','unit','sig_comment'
     ]
-    # write as UTF-8 with BOM
-    with open(out_path, 'w', newline='', encoding='utf-8-sig') as fo:
-        w = csv.writer(fo)
-        w.writerow(header)
-        w.writerows(signals)
-    print(f"✅ Wrote {len(signals)} signals to {out_path}")
+    with out_path.open('w', newline='', encoding='utf-8-sig') as fo:
+        csv.writer(fo).writerows([header] + rows)
+    print(f"✅ Wrote {len(rows)} signals → {out_path}")
 
+# ── MAIN ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    sigs = parse_dbc(DBC_PATH)
-    write_csv(sigs, OUTPUT_CSV)
+    if not DBC_PATH.exists():
+        raise FileNotFoundError(DBC_PATH)
+    msg_cmt, sig_cmt = collect_comments(DBC_PATH)
+    sig_rows = parse_dbc(DBC_PATH, msg_cmt, sig_cmt)
+    write_csv(sig_rows, OUTPUT_CSV)
