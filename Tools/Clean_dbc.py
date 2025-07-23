@@ -73,7 +73,8 @@ def write_csv(signals, out_path):
         'start','length','byte_order',
         'is_signed','scale','offset','unit'
     ]
-    with open(out_path, 'w', newline='') as fo:
+    # write as UTF-8 with BOM
+    with open(out_path, 'w', newline='', encoding='utf-8-sig') as fo:
         w = csv.writer(fo)
         w.writerow(header)
         w.writerows(signals)
