@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# parse_dbc.py
+# Clean_dbc.py
 
 import re
 import csv
