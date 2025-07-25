@@ -20,10 +20,6 @@ def _to_int(val):
     except ValueError:
         return int(s, 16)
 
-def _vbit(data: bytes, bit: int) -> int:
-    return (data[bit // 8] >> (bit & 7)) & 1
-
-
 # ─────── ONE decoding brain (Motorola fixed) ───────
 def decode_signal(payload: bytes,
                   start: int,
@@ -34,24 +30,25 @@ def decode_signal(payload: bytes,
                   offset: float):
     """
     Return the *physical* value using Vector numbering.
-
     • Intel  (little) → start bit is LSB, bits ascend
     • Motorola (big)  → start bit is MSB, bits descend **within each byte**
                          but jump +8 every full byte (Vector rule)
     """
-    order_key = ''.join(byte_order.lower().split())
-    motorola  = any(k in order_key for k in ("motorola", "big", "msb"))
+    def get_bit(data: bytes, bit: int) -> int:
+        return (data[bit // 8] >> (bit & 7)) & 1
 
+    order_key = ''.join(byte_order.lower().split())
+    motorola = any(k in order_key for k in ("motorola", "big", "msb"))
     raw = 0
+
     if motorola:
         for i in range(length):
-            # Vector Motorola rule: within a byte bits descend,
-            # then jump +8 for each new byte chunk.
+            # Vector Motorola rule
             bit = start + 8 * (i // 8) - (i % 8)
-            raw = (raw << 1) | _vbit(payload, bit)
-    else:  # Intel / little‑endian
+            raw = (raw << 1) | get_bit(payload, bit)
+    else:  # Intel / little-endian
         for i in range(length):
-            raw |= _vbit(payload, start + i) << i
+            raw |= get_bit(payload, start + i) << i
 
     if is_signed and raw & (1 << (length - 1)):
         raw -= 1 << length

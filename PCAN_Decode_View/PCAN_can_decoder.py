@@ -25,45 +25,39 @@ PCAN_CHANNEL  = "PCAN_USBBUS1"                    # ← update
 BITRATE       = 500_000                           # ← update
 # ────────────────────────────────────────────────────────────────
 
-
-# ====== bit helpers ==========================================================
-def _vbit(data: bytes, pos: int) -> int:
-    """Return the value (0|1) of absolute bit *pos* (Vector numbering)."""
-    byte_i, bit_i = divmod(pos, 8)
-    return (data[byte_i] >> bit_i) & 1
-
-
 def decode_signal(payload: bytes,
                   start: int,
                   length: int,
                   byte_order: str,
                   is_signed: bool,
                   scale: float,
-                  offset: float) -> float:
+                  offset: float):
     """
     Return the *physical* value using Vector numbering.
-
-    • Intel (little)  → start bit is LSB, bits ascend
-    • Motorola (big)  → start bit is MSB, bits descend within each byte
-                        but jump +8 every full byte (Vector rule)
+    • Intel  (little) → start bit is LSB, bits ascend
+    • Motorola (big)  → start bit is MSB, bits descend **within each byte**
+                         but jump +8 every full byte (Vector rule)
     """
+    def get_bit(data: bytes, bit: int) -> int:
+        return (data[bit // 8] >> (bit & 7)) & 1
+
     order_key = ''.join(byte_order.lower().split())
-    motorola  = any(k in order_key for k in ("motorola", "big", "msb"))
-
+    motorola = any(k in order_key for k in ("motorola", "big", "msb"))
     raw = 0
-    if motorola:                                   # MSB‑first packing
-        for i in range(length):
-            bit = start + 8 * (i // 8) - (i % 8)   # Vector Motorola rule
-            raw = (raw << 1) | _vbit(payload, bit)
-    else:                                          # Intel / little‑endian
-        for i in range(length):
-            raw |= _vbit(payload, start + i) << i
 
-    if is_signed and raw & (1 << (length - 1)):    # two’s‑complement
+    if motorola:
+        for i in range(length):
+            # Vector Motorola rule
+            bit = start + 8 * (i // 8) - (i % 8)
+            raw = (raw << 1) | get_bit(payload, bit)
+    else:  # Intel / little-endian
+        for i in range(length):
+            raw |= get_bit(payload, start + i) << i
+
+    if is_signed and raw & (1 << (length - 1)):
         raw -= 1 << length
 
     return raw * scale + offset
-
 
 # ====== CSV → in‑memory definitions =========================================
 @dataclass

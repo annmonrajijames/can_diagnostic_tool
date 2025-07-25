@@ -14,7 +14,7 @@ import csv
 from pathlib import Path
 
 # ── USER PATHS ──────────────────────────────────────────────────────────────
-DBC_PATH   = Path(r"C:\Users\annmo\Downloads\DBC_sample.dbc")
+DBC_PATH   = Path(r"C:\Users\annmo\Downloads\reconstructed.dbc")
 OUTPUT_CSV = Path(r"C:\Users\annmo\Downloads\signals.csv")
 # ────────────────────────────────────────────────────────────────────────────
 
