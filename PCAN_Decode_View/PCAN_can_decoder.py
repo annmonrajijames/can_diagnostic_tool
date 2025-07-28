@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 # ─────────────────── USER SETTINGS ──────────────────────────────
-SIGNALS_CSV   = Path(r"C:\Users\annmo\Downloads\signals.csv")   # ← update
+SIGNALS_CSV   = Path(r"C:\Git_projects\can_diagnostic_tool\data\signals.csv")   # ← update
 PCAN_CHANNEL  = "PCAN_USBBUS1"                    # ← update
 BITRATE       = 500_000                           # ← update
 # ────────────────────────────────────────────────────────────────
