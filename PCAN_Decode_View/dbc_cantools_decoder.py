@@ -28,49 +28,57 @@ dbc = cantools.database.load_file(DBC_PATH)
 print(f"Loaded DBC: {DBC_PATH}  (messages: {len(dbc.messages)})")
 
 # ───────── CAN reader thread ─────────
+# ───────── CAN reader thread (interruptible) ─────────
 class CanReader(QThread):
-    new_signal = Signal(str, float, str, float)   # qname, value, unit, cycle‑ms
+    new_signal = Signal(str, float, str, float)
 
     def __init__(self):
         super().__init__()
+        self._running = True
         self._last_ts: Dict[str, float] = {}
+
         bus_kwargs = dict(interface="pcan",
                           channel=PCAN_CHANNEL,
                           bitrate=BITRATE)
         if USE_CAN_FD:
             bus_kwargs.update(fd=True, bitrate_fd=DATA_PHASE)
+
         self.bus = can.Bus(**bus_kwargs)
 
     def run(self):
         try:
-            for msg in self.bus:
+            while self._running:
+                msg = self.bus.recv(timeout=0.1)   # ← 100 ms poll
+                if msg is None:
+                    continue                      # timeout tick
                 can_id = msg.arbitration_id | (0x8000_0000 if msg.is_extended_id else 0)
+
                 try:
                     mdef = dbc.get_message_by_frame_id(can_id)
                 except KeyError:
-                    continue                              # ID not in DBC → ignore
+                    continue
 
                 try:
                     decoded = mdef.decode(msg.data, allow_truncated=False,
                                           decode_choices=True)
                 except cantools.DecodeError:
-                    continue                              # length / format issue
+                    continue
 
                 now = msg.timestamp
-                for sig_name, val in decoded.items():     # only signals truly present
+                for sig_name, val in decoded.items():
                     qname = f"{mdef.name}.{sig_name}"
                     unit  = mdef.get_signal_by_name(sig_name).unit or ""
                     cycle = 0.0
                     if qname in self._last_ts:
-                        cycle = round((now - self._last_ts[qname])*1000, 1)
+                        cycle = round((now - self._last_ts[qname]) * 1000, 1)
                     self._last_ts[qname] = now
                     self.new_signal.emit(qname, val, unit, cycle)
         finally:
-            self.bus.shutdown()
+            self.bus.shutdown()                   # ensure CAN interface closes
 
     def stop(self):
-        self.quit()
-        self.wait()
+        self._running = False                     # let run() exit
+        self.wait()                               # block until thread really ends
 
 # ───────── Qt GUI ─────────
 class MainWindow(QMainWindow):
@@ -113,8 +121,8 @@ class MainWindow(QMainWindow):
             self.table.item(row, 3).setText(cycle_txt)
 
     def closeEvent(self, event):
-        self.reader.stop()
-        super().closeEvent(event)
+        self.reader.stop()   # clean shutdown without dead‑lock
+        event.accept()
 
 # ───────── run app ─────────
 def main():
