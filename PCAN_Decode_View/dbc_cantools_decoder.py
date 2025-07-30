@@ -1,10 +1,10 @@
 """
-live_signal_viewer_multiplex.py
-• Handles multiplexed signals safely
-• Shows all 157 signals as soon as they appear
-• Updates value + individual cycle‑time every time the specific
-  signal is present in a frame
+live_signal_viewer_final.py
+• Shows separate columns for Msg ID, Msg Name, Signal Name
+• Handles multiplexed signals, clean shutdown, no OverflowError
+• Prints CAN IDs in proper hex format (0x8, 0x18FF1234, etc.)
 """
+
 import sys, time
 from pathlib import Path
 from typing import Dict
@@ -16,21 +16,23 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget
 )
 
-# ───────── user settings ─────────
+# ─────────── User Settings ───────────
 DBC_PATH     = Path(r"C:\Git_projects\can_diagnostic_tool\data\DBC_sample_cantools.dbc")
 PCAN_CHANNEL = "PCAN_USBBUS1"
 BITRATE      = 500_000
 USE_CAN_FD   = False
 DATA_PHASE   = "500K/2M"
-# ──────────────────────────────────
+# ─────────────────────────────────────
 
 dbc = cantools.database.load_file(DBC_PATH)
 print(f"Loaded DBC: {DBC_PATH}  (messages: {len(dbc.messages)})")
 
-# ───────── CAN reader thread ─────────
-# ───────── CAN reader thread (interruptible) ─────────
+# ───────── CAN Reader Thread ─────────
 class CanReader(QThread):
-    new_signal = Signal(str, float, str, float)
+    """
+    Emits: real_can_id, message_name, signal_name, value, unit, cycle_ms
+    """
+    new_signal = Signal(int, str, str, float, str, float)
 
     def __init__(self):
         super().__init__()
@@ -42,16 +44,17 @@ class CanReader(QThread):
                           bitrate=BITRATE)
         if USE_CAN_FD:
             bus_kwargs.update(fd=True, bitrate_fd=DATA_PHASE)
-
         self.bus = can.Bus(**bus_kwargs)
 
     def run(self):
         try:
             while self._running:
-                msg = self.bus.recv(timeout=0.1)   # ← 100 ms poll
+                msg = self.bus.recv(timeout=0.1)
                 if msg is None:
-                    continue                      # timeout tick
-                can_id = msg.arbitration_id | (0x8000_0000 if msg.is_extended_id else 0)
+                    continue
+
+                raw_id = msg.arbitration_id
+                can_id = raw_id | (0x8000_0000 if msg.is_extended_id else 0)
 
                 try:
                     mdef = dbc.get_message_by_frame_id(can_id)
@@ -66,68 +69,94 @@ class CanReader(QThread):
 
                 now = msg.timestamp
                 for sig_name, val in decoded.items():
-                    qname = f"{mdef.name}.{sig_name}"
-                    unit  = mdef.get_signal_by_name(sig_name).unit or ""
+                    qkey  = f"{mdef.name}.{sig_name}"
                     cycle = 0.0
-                    if qname in self._last_ts:
-                        cycle = round((now - self._last_ts[qname]) * 1000, 1)
-                    self._last_ts[qname] = now
-                    self.new_signal.emit(qname, val, unit, cycle)
+                    if qkey in self._last_ts:
+                        cycle = round((now - self._last_ts[qkey]) * 1000, 1)
+                    self._last_ts[qkey] = now
+                    unit = mdef.get_signal_by_name(sig_name).unit or ""
+                    self.new_signal.emit(raw_id, mdef.name, sig_name,
+                                         val, unit, cycle)
         finally:
-            self.bus.shutdown()                   # ensure CAN interface closes
+            self.bus.shutdown()
 
     def stop(self):
-        self._running = False                     # let run() exit
-        self.wait()                               # block until thread really ends
+        self._running = False
+        self.wait()
 
-# ───────── Qt GUI ─────────
+# ───────── GUI Window ─────────
 class MainWindow(QMainWindow):
-    headers = ["Signal", "Value", "Unit", "Cycle Time (ms)"]
+    """
+    Columns:
+        0  Msg ID
+        1  Msg Name
+        2  Signal Name
+        3  Value
+        4  Unit
+        5  Cycle‑Time (ms)
+    """
+    headers = ["Message ID", "Message Name", "Signal Name",
+               "Value", "Unit", "Cycle Time (ms)"]
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Live CAN Signal Viewer – multiplex‑safe")
-        self.resize(950, 600)
+        self.setWindowTitle("Live CAN Signal Viewer – FINAL")
+        self.resize(1050, 600)
 
-        self.table   = QTableWidget(0, len(self.headers))
+        self.table = QTableWidget(0, len(self.headers))
         self.table.setHorizontalHeaderLabels(self.headers)
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
 
         self.row_map: Dict[str, int] = {}
 
-        lay  = QVBoxLayout(); lay.addWidget(self.table)
-        root = QWidget();     root.setLayout(lay); self.setCentralWidget(root)
+        layout = QVBoxLayout()
+        layout.addWidget(self.table)
+        container = QWidget()
+        container.setLayout(layout)
+        self.setCentralWidget(container)
 
         self.reader = CanReader()
         self.reader.new_signal.connect(self.update_row)
         self.reader.start()
 
-    def update_row(self, qname: str, value: float, unit: str, cycle_ms: float):
-        row = self.row_map.get(qname)
-        val_txt   = f"{value:g}"
-        cycle_txt = f"{cycle_ms:.1f}" if cycle_ms else "—"
+    def update_row(self, can_id: int, msg_name: str, sig_name: str,
+                   value: float, unit: str, cycle_ms: float):
+        key = f"{msg_name}.{sig_name}"
+        row = self.row_map.get(key)
 
-        if row is None:                           # first time this signal appears
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(qname))
-            self.table.setItem(row, 1, QTableWidgetItem(val_txt))
-            self.table.setItem(row, 2, QTableWidgetItem(unit))
-            self.table.setItem(row, 3, QTableWidgetItem(cycle_txt))
-            self.row_map[qname] = row
-        else:                                     # update existing row
-            self.table.item(row, 1).setText(val_txt)
-            self.table.item(row, 3).setText(cycle_txt)
+        try:
+            id_text  = f"0x{can_id:X}"
+            val_text = str(value)
+            cyc_text = f"{cycle_ms:.1f}" if cycle_ms else "—"
+
+            if row is None:
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                self.table.setItem(row, 0, QTableWidgetItem(id_text))
+                self.table.setItem(row, 1, QTableWidgetItem(msg_name))
+                self.table.setItem(row, 2, QTableWidgetItem(sig_name))
+                self.table.setItem(row, 3, QTableWidgetItem(val_text))
+                self.table.setItem(row, 4, QTableWidgetItem(unit))
+                self.table.setItem(row, 5, QTableWidgetItem(cyc_text))
+                self.row_map[key] = row
+            else:
+                self.table.item(row, 0).setText(id_text)
+                self.table.item(row, 3).setText(val_text)
+                self.table.item(row, 5).setText(cyc_text)
+
+        except Exception as e:
+            print(f"⚠️ GUI update error for {key}: {e}")
 
     def closeEvent(self, event):
-        self.reader.stop()   # clean shutdown without dead‑lock
-        event.accept()
+        self.reader.stop()
+        super().closeEvent(event)
 
-# ───────── run app ─────────
+# ───────── App Entrypoint ─────────
 def main():
     app = QApplication(sys.argv)
-    win = MainWindow(); win.show()
+    win = MainWindow()
+    win.show()
     sys.exit(app.exec())
 
 if __name__ == "__main__":
