@@ -1,10 +1,3 @@
-"""
-live_signal_viewer_final.py
-• Shows separate columns for Msg ID, Msg Name, Signal Name
-• Handles multiplexed signals, clean shutdown, no OverflowError
-• Prints CAN IDs in proper hex format (0x8, 0x18FF1234, etc.)
-"""
-
 import sys, time
 from pathlib import Path
 from typing import Dict
@@ -13,7 +6,7 @@ import can, cantools
 from PySide6.QtCore    import QThread, Signal
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget
+    QVBoxLayout, QWidget, QPushButton, QHBoxLayout
 )
 
 # ─────────── User Settings ───────────
@@ -94,14 +87,15 @@ class MainWindow(QMainWindow):
         3  Value
         4  Unit
         5  Cycle‑Time (ms)
+        6  Count
     """
     headers = ["Message ID", "Message Name", "Signal Name",
-               "Value", "Unit", "Cycle Time (ms)"]
+               "Value", "Unit", "Cycle Time (ms)", "Count"]
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Live CAN Signal Viewer – FINAL")
-        self.resize(1050, 600)
+        self.setWindowTitle("Live CAN Signal Viewer – with Count")
+        self.resize(1150, 650)
 
         self.table = QTableWidget(0, len(self.headers))
         self.table.setHorizontalHeaderLabels(self.headers)
@@ -109,9 +103,14 @@ class MainWindow(QMainWindow):
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
 
         self.row_map: Dict[str, int] = {}
+        self.count_map: Dict[str, int] = {}
+
+        self.restart_button = QPushButton("Restart Count")
+        self.restart_button.clicked.connect(self.restart_counts)
 
         layout = QVBoxLayout()
         layout.addWidget(self.table)
+        layout.addWidget(self.restart_button)
         container = QWidget()
         container.setLayout(layout)
         self.setCentralWidget(container)
@@ -119,6 +118,11 @@ class MainWindow(QMainWindow):
         self.reader = CanReader()
         self.reader.new_signal.connect(self.update_row)
         self.reader.start()
+
+    def restart_counts(self):
+        self.count_map = {}
+        for row in range(self.table.rowCount()):
+            self.table.item(row, 6).setText("0")
 
     def update_row(self, can_id: int, msg_name: str, sig_name: str,
                    value: float, unit: str, cycle_ms: float):
@@ -129,6 +133,8 @@ class MainWindow(QMainWindow):
             id_text  = f"0x{can_id:X}"
             val_text = str(value)
             cyc_text = f"{cycle_ms:.1f}" if cycle_ms else "—"
+            count    = self.count_map.get(key, 0) + 1
+            self.count_map[key] = count
 
             if row is None:
                 row = self.table.rowCount()
@@ -139,11 +145,13 @@ class MainWindow(QMainWindow):
                 self.table.setItem(row, 3, QTableWidgetItem(val_text))
                 self.table.setItem(row, 4, QTableWidgetItem(unit))
                 self.table.setItem(row, 5, QTableWidgetItem(cyc_text))
+                self.table.setItem(row, 6, QTableWidgetItem(str(count)))
                 self.row_map[key] = row
             else:
                 self.table.item(row, 0).setText(id_text)
                 self.table.item(row, 3).setText(val_text)
                 self.table.item(row, 5).setText(cyc_text)
+                self.table.item(row, 6).setText(str(count))
 
         except Exception as e:
             print(f"⚠️ GUI update error for {key}: {e}")
