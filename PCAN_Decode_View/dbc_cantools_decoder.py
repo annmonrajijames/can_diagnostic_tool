@@ -1,114 +1,125 @@
-import sys
+"""
+live_signal_viewer_multiplex.py
+• Handles multiplexed signals safely
+• Shows all 157 signals as soon as they appear
+• Updates value + individual cycle‑time every time the specific
+  signal is present in a frame
+"""
+import sys, time
 from pathlib import Path
 from typing import Dict
 
-import can
-import cantools
-from PySide6.QtCore import Qt, QThread, Signal
+import can, cantools
+from PySide6.QtCore    import QThread, Signal
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget
 )
 
-# ─────────────── Settings ────────────────
-DBC_PATH = Path(r"C:\Git_projects\can_diagnostic_tool\data\DBC_sample_cantools.dbc")
+# ───────── user settings ─────────
+DBC_PATH     = Path(r"C:\Git_projects\can_diagnostic_tool\data\DBC_sample_cantools.dbc")
 PCAN_CHANNEL = "PCAN_USBBUS1"
-BITRATE = 500_000
-# ─────────────────────────────────────────
+BITRATE      = 500_000
+USE_CAN_FD   = False
+DATA_PHASE   = "500K/2M"
+# ──────────────────────────────────
 
-def load_dbc(dbc_path: Path):
-    return cantools.database.load_file(dbc_path)
+dbc = cantools.database.load_file(DBC_PATH)
+print(f"Loaded DBC: {DBC_PATH}  (messages: {len(dbc.messages)})")
 
-# ───────────── CAN Reader Thread ─────────────
+# ───────── CAN reader thread ─────────
 class CanReader(QThread):
-    new_frame = Signal(int, bytes, float)
+    new_signal = Signal(str, float, str, float)   # qname, value, unit, cycle‑ms
 
-    def __init__(self, channel: str, bitrate: int):
+    def __init__(self):
         super().__init__()
-        self.channel = channel
-        self.bitrate = bitrate
-        self._stop = False
-        self._last_ts: Dict[int, float] = {}
+        self._last_ts: Dict[str, float] = {}
+        bus_kwargs = dict(interface="pcan",
+                          channel=PCAN_CHANNEL,
+                          bitrate=BITRATE)
+        if USE_CAN_FD:
+            bus_kwargs.update(fd=True, bitrate_fd=DATA_PHASE)
+        self.bus = can.Bus(**bus_kwargs)
 
     def run(self):
-        bus = can.Bus(interface="pcan", channel=self.channel, bitrate=self.bitrate)
         try:
-            for msg in bus:
-                if self._stop:
-                    break
+            for msg in self.bus:
+                can_id = msg.arbitration_id | (0x8000_0000 if msg.is_extended_id else 0)
+                try:
+                    mdef = dbc.get_message_by_frame_id(can_id)
+                except KeyError:
+                    continue                              # ID not in DBC → ignore
+
+                try:
+                    decoded = mdef.decode(msg.data, allow_truncated=False,
+                                          decode_choices=True)
+                except cantools.DecodeError:
+                    continue                              # length / format issue
+
                 now = msg.timestamp
-                can_id = msg.arbitration_id
-                payload = msg.data
-
-                cycle_ms = 0.0
-                if can_id in self._last_ts:
-                    cycle_ms = (now - self._last_ts[can_id]) * 1000.0
-                self._last_ts[can_id] = now
-
-                self.new_frame.emit(can_id, payload, cycle_ms)
+                for sig_name, val in decoded.items():     # only signals truly present
+                    qname = f"{mdef.name}.{sig_name}"
+                    unit  = mdef.get_signal_by_name(sig_name).unit or ""
+                    cycle = 0.0
+                    if qname in self._last_ts:
+                        cycle = round((now - self._last_ts[qname])*1000, 1)
+                    self._last_ts[qname] = now
+                    self.new_signal.emit(qname, val, unit, cycle)
         finally:
-            bus.shutdown()
+            self.bus.shutdown()
 
     def stop(self):
-        self._stop = True
         self.quit()
         self.wait()
 
-# ───────────── Main GUI ─────────────
+# ───────── Qt GUI ─────────
 class MainWindow(QMainWindow):
-    headers = ["CAN ID (hex)", "Payload", "Cycle Time (ms)"]
+    headers = ["Signal", "Value", "Unit", "Cycle Time (ms)"]
 
-    def __init__(self, dbc_db):
+    def __init__(self):
         super().__init__()
-        self.setWindowTitle("Live CAN ID + Payload Viewer")
-        self.resize(800, 600)
+        self.setWindowTitle("Live CAN Signal Viewer – multiplex‑safe")
+        self.resize(950, 600)
 
-        self.dbc = dbc_db  # Loaded, not used yet
-        self.table = QTableWidget(0, len(self.headers))
+        self.table   = QTableWidget(0, len(self.headers))
         self.table.setHorizontalHeaderLabels(self.headers)
         self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
 
-        self.row_map: Dict[int, int] = {}  # can_id → row index
+        self.row_map: Dict[str, int] = {}
 
-        layout = QVBoxLayout()
-        layout.addWidget(self.table)
-        container = QWidget()
-        container.setLayout(layout)
-        self.setCentralWidget(container)
+        lay  = QVBoxLayout(); lay.addWidget(self.table)
+        root = QWidget();     root.setLayout(lay); self.setCentralWidget(root)
 
-        self.reader = CanReader(PCAN_CHANNEL, BITRATE)
-        self.reader.new_frame.connect(self.on_new_frame)
+        self.reader = CanReader()
+        self.reader.new_signal.connect(self.update_row)
         self.reader.start()
 
-    def on_new_frame(self, can_id: int, payload: bytes, cycle_ms: float):
-        row = self.row_map.get(can_id)
+    def update_row(self, qname: str, value: float, unit: str, cycle_ms: float):
+        row = self.row_map.get(qname)
+        val_txt   = f"{value:g}"
+        cycle_txt = f"{cycle_ms:.1f}" if cycle_ms else "—"
 
-        payload_str = payload.hex(" ").upper()
-        cycle_str = f"{cycle_ms:.1f}" if cycle_ms > 0 else "—"
-
-        if row is None:
-            # New CAN ID → Add row
+        if row is None:                           # first time this signal appears
             row = self.table.rowCount()
             self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(f"0x{can_id:08X}"))
-            self.table.setItem(row, 1, QTableWidgetItem(payload_str))
-            self.table.setItem(row, 2, QTableWidgetItem(cycle_str))
-            self.row_map[can_id] = row
-        else:
-            # Existing ID → update payload and cycle
-            self.table.item(row, 1).setText(payload_str)
-            self.table.item(row, 2).setText(cycle_str)
+            self.table.setItem(row, 0, QTableWidgetItem(qname))
+            self.table.setItem(row, 1, QTableWidgetItem(val_txt))
+            self.table.setItem(row, 2, QTableWidgetItem(unit))
+            self.table.setItem(row, 3, QTableWidgetItem(cycle_txt))
+            self.row_map[qname] = row
+        else:                                     # update existing row
+            self.table.item(row, 1).setText(val_txt)
+            self.table.item(row, 3).setText(cycle_txt)
 
     def closeEvent(self, event):
         self.reader.stop()
         super().closeEvent(event)
 
-# ───────────── Main Entrypoint ─────────────
+# ───────── run app ─────────
 def main():
-    dbc_db = load_dbc(DBC_PATH)
     app = QApplication(sys.argv)
-    win = MainWindow(dbc_db)
-    win.show()
+    win = MainWindow(); win.show()
     sys.exit(app.exec())
 
 if __name__ == "__main__":
