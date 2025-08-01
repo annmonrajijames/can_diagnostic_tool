@@ -1,48 +1,60 @@
 """
-Settings_page.py
----------------------------------------------------------
-All hardware-specific details live here.
-If you change interface, channel, bitrate, or move to a
-different CAN library, edit only this file.
+Settings_page.py  –  one stop for hardware details.
 
-It exposes one public function:
-
+Exposes
     get_config_and_bus() -> (settings_dict, bus_like_object)
 
-The returned `bus` must provide:
-    • recv(timeout)  -> message | None
-    • shutdown()     (optional but nice to have)
-
-For offline testing set USE_DUMMY_BUS = True – a synthetic
-bus that yields no messages but lets the GUI run.
+The returned `bus.recv()` always yields a `SimpleMessage` with:
+    arbitration_id • is_extended_id • data • timestamp
+so the rest of the app never touches python-can directly.
 """
 from pathlib import Path
 from typing import Dict, Tuple
-import can
+from collections import namedtuple
 
-USE_DUMMY_BUS = False          # ← flip to True for hardware-free demo
+# ---- user knob: run without hardware ----------------------
+USE_DUMMY_BUS = False           # True → GUI runs, but no real frames
+# -----------------------------------------------------------
 
-# -------------------------------------------------- #
-def _build_real_bus(settings) -> "can.Bus":
-    import can                                        # local import only
+SimpleMessage = namedtuple(
+    "SimpleMessage",
+    ["arbitration_id", "is_extended_id", "data", "timestamp"]
+)
+
+# -----------------------------------------------------------#
+def _make_real_bus(settings):
+    import can                       # local import only here
     kwargs = dict(interface="pcan",
                   channel=settings["PCAN_CHANNEL"],
                   bitrate=settings["BITRATE"])
     if settings["USE_CAN_FD"]:
         kwargs.update(fd=True, bitrate_fd=settings["DATA_PHASE"])
-    return can.Bus(**kwargs)
+    real_bus = can.Bus(**kwargs)
 
-# -------------------------------------------------- #
+    # Wrap to emit SimpleMessage
+    class WrappedBus:
+        def recv(self, timeout=0.1):
+            msg = real_bus.recv(timeout)
+            if msg is None:
+                return None
+            return SimpleMessage(msg.arbitration_id,
+                                 msg.is_extended_id,
+                                 msg.data,
+                                 msg.timestamp)
+        def shutdown(self):
+            real_bus.shutdown()
+    return WrappedBus()
+
+# -----------------------------------------------------------#
 class DummyBus:
-    """Minimal stand-in so the viewer runs without hardware."""
+    """Stand-in when hardware unavailable."""
     def recv(self, timeout: float = 0.1):
-        import time
-        time.sleep(timeout)
+        import time; time.sleep(timeout)
         return None
     def shutdown(self):
         pass
 
-# -------------------------------------------------- #
+# -----------------------------------------------------------#
 def get_config_and_bus() -> Tuple[Dict[str, object], object]:
     settings = {
         "DBC_PATH"    : Path(r"C:\Git_projects\can_diagnostic_tool\data\DBC_sample_cantools.dbc"),
@@ -57,5 +69,5 @@ def get_config_and_bus() -> Tuple[Dict[str, object], object]:
         print(f"{k:13}: {v}")
     print("====================================\n")
 
-    bus = DummyBus() if USE_DUMMY_BUS else _build_real_bus(settings)
+    bus = DummyBus() if USE_DUMMY_BUS else _make_real_bus(settings)
     return settings, bus

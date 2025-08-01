@@ -1,14 +1,3 @@
-"""
-live_signal_viewer.py
-Real-time CAN-bus signal viewer (hardware-independent).
-
-Depends on:
-  • cantools
-  • PySide6
-  • python-can (only inside Settings_page.py)
-
-Run:  python live_signal_viewer.py
-"""
 import sys
 from typing import Dict
 
@@ -19,47 +8,38 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton
 )
 
-# ---- bring in settings + ready-to-use bus -----------------
 from Settings_page import get_config_and_bus
 cfg, BUS = get_config_and_bus()
-# -----------------------------------------------------------
 
 dbc = cantools.database.load_file(cfg["DBC_PATH"])
 print(f"Loaded DBC: {cfg['DBC_PATH']}  (messages: {len(dbc.messages)})")
 
-# ---------- helper: id → cantools message ----------
 def get_message(dbc_db, frame_id: int, is_ext: bool):
     lookup_id = frame_id | 0x8000_0000 if is_ext else frame_id
     return dbc_db._frame_id_to_message.get(lookup_id)
 
-# ---------- CAN Reader Thread ----------
 class CanReader(QThread):
     new_signal = Signal(int, bool, str, str, float, str, float)
-
-    def __init__(self, bus):
+    def __init__(self, bus):       # <- receives ready-to-use bus
         super().__init__()
-        self.bus        = bus    # already initialised
-        self._running   = True
+        self.bus = bus
+        self._running = True
         self._last_ts: Dict[str, float] = {}
-
     def run(self):
         try:
             while self._running:
                 msg = self.bus.recv(timeout=0.1)
                 if msg is None:
                     continue
-
                 mdef = get_message(dbc, msg.arbitration_id, msg.is_extended_id)
                 if mdef is None:
                     continue
-
                 try:
                     decoded = mdef.decode(msg.data,
                                           allow_truncated=False,
                                           decode_choices=True)
                 except cantools.DecodeError:
                     continue
-
                 now = msg.timestamp
                 for sig_name, val in decoded.items():
                     qkey  = f"{mdef.name}.{sig_name}"
@@ -73,16 +53,13 @@ class CanReader(QThread):
         finally:
             if hasattr(self.bus, "shutdown"):
                 self.bus.shutdown()
-
     def stop(self):
         self._running = False
         self.wait()
 
-# ---------- GUI ----------
 class MainWindow(QMainWindow):
     headers = ["Message ID", "Message Name", "Signal Name",
                "Value", "Unit", "Cycle Time (ms)", "Count"]
-
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Live CAN Signal Viewer")
@@ -115,13 +92,11 @@ class MainWindow(QMainWindow):
                    value: float, unit: str, cycle_ms: float):
         key  = f"{msg_name}.{sig_name}"
         row  = self.row_map.get(key)
-
         id_text  = f"0x{frame_id:X}" + (" (EXT)" if is_ext else "")
         val_text = str(value)
         cyc_text = f"{cycle_ms:.1f}" if cycle_ms else "—"
         count    = self.count_map.get(key, 0) + 1
         self.count_map[key] = count
-
         if row is None:
             row = self.table.rowCount()
             self.table.insertRow(row)
@@ -134,12 +109,10 @@ class MainWindow(QMainWindow):
             self.table.item(row, 3).setText(val_text)
             self.table.item(row, 5).setText(cyc_text)
             self.table.item(row, 6).setText(str(count))
-
     def closeEvent(self, event):
         self.reader.stop()
         super().closeEvent(event)
 
-# ---------- Entrypoint ----------
 def main():
     app = QApplication(sys.argv)
     win = MainWindow(); win.show()
