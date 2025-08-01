@@ -1,70 +1,46 @@
-import sys, time
-from pathlib import Path
+"""
+live_signal_viewer.py
+Real-time CAN-bus signal viewer (hardware-independent).
+
+Depends on:
+  • cantools
+  • PySide6
+  • python-can (only inside Settings_page.py)
+
+Run:  python live_signal_viewer.py
+"""
+import sys
 from typing import Dict
 
-import can, cantools
+import cantools
 from PySide6.QtCore    import QThread, Signal
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget, QPushButton
 )
 
-# ─────────────────────────────────────────────────────────────
-def Settings_fun() -> Dict[str, object]:
-    """
-    Central place for all user-editable parameters.
-    Edit values here instead of hunting through the code.
-
-    Returns a dict:
-        {
-          "DBC_PATH"    : Path,
-          "PCAN_CHANNEL": str,
-          "BITRATE"     : int,
-          "USE_CAN_FD"  : bool,
-          "DATA_PHASE"  : str   # Nominal/Data bitrate for CAN-FD
-        }
-    """
-    settings = {
-        "DBC_PATH"    : Path(r"C:\Git_projects\can_diagnostic_tool\data\DBC_sample_cantools.dbc"),
-        "PCAN_CHANNEL": "PCAN_USBBUS1",
-        "BITRATE"     : 500_000,
-        "USE_CAN_FD"  : False,
-        "DATA_PHASE"  : "500K/2M",         # ignored when USE_CAN_FD = False
-    }
-
-    print("\n========= Runtime Settings =========")
-    for k, v in settings.items():
-        print(f"{k:13}: {v}")
-    print("====================================\n")
-
-    return settings
-# ─────────────────────────────────────────────────────────────
-
-cfg = Settings_fun()                      # ← call once at launch
+# ---- bring in settings + ready-to-use bus -----------------
+from Settings_page import get_config_and_bus
+cfg, BUS = get_config_and_bus()
+# -----------------------------------------------------------
 
 dbc = cantools.database.load_file(cfg["DBC_PATH"])
 print(f"Loaded DBC: {cfg['DBC_PATH']}  (messages: {len(dbc.messages)})")
 
-# ───────── helper: fast frame-id → cantools lookup ─────────
+# ---------- helper: id → cantools message ----------
 def get_message(dbc_db, frame_id: int, is_ext: bool):
     lookup_id = frame_id | 0x8000_0000 if is_ext else frame_id
-    return dbc_db._frame_id_to_message.get(lookup_id)   # None if absent
+    return dbc_db._frame_id_to_message.get(lookup_id)
 
-# ───────── CAN Reader Thread ─────────
+# ---------- CAN Reader Thread ----------
 class CanReader(QThread):
     new_signal = Signal(int, bool, str, str, float, str, float)
 
-    def __init__(self):
+    def __init__(self, bus):
         super().__init__()
-        self._running = True
+        self.bus        = bus    # already initialised
+        self._running   = True
         self._last_ts: Dict[str, float] = {}
-
-        bus_kwargs = dict(interface="pcan",
-                          channel=cfg["PCAN_CHANNEL"],
-                          bitrate=cfg["BITRATE"])
-        if cfg["USE_CAN_FD"]:
-            bus_kwargs.update(fd=True, bitrate_fd=cfg["DATA_PHASE"])
-        self.bus = can.Bus(**bus_kwargs)
 
     def run(self):
         try:
@@ -95,20 +71,21 @@ class CanReader(QThread):
                                          mdef.name, sig_name,
                                          val, unit, cycle)
         finally:
-            self.bus.shutdown()
+            if hasattr(self.bus, "shutdown"):
+                self.bus.shutdown()
 
     def stop(self):
         self._running = False
         self.wait()
 
-# ───────── GUI Window ─────────
+# ---------- GUI ----------
 class MainWindow(QMainWindow):
     headers = ["Message ID", "Message Name", "Signal Name",
                "Value", "Unit", "Cycle Time (ms)", "Count"]
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Live CAN Signal Viewer – organised")
+        self.setWindowTitle("Live CAN Signal Viewer")
         self.resize(1150, 650)
 
         self.table = QTableWidget(0, len(self.headers))
@@ -125,7 +102,7 @@ class MainWindow(QMainWindow):
         lay = QVBoxLayout(); lay.addWidget(self.table); lay.addWidget(self.restart_button)
         root = QWidget();   root.setLayout(lay); self.setCentralWidget(root)
 
-        self.reader = CanReader()
+        self.reader = CanReader(BUS)
         self.reader.new_signal.connect(self.update_row)
         self.reader.start()
 
@@ -162,7 +139,7 @@ class MainWindow(QMainWindow):
         self.reader.stop()
         super().closeEvent(event)
 
-# ───────── App Entrypoint ─────────
+# ---------- Entrypoint ----------
 def main():
     app = QApplication(sys.argv)
     win = MainWindow(); win.show()
