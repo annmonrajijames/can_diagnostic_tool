@@ -14,8 +14,9 @@ import csv
 from pathlib import Path
 
 # ── USER PATHS ──────────────────────────────────────────────────────────────
-DBC_PATH   = Path(r"C:\Git_projects\can_diagnostic_tool\data\DBC_sample.dbc")
-OUTPUT_CSV = Path(r"C:\Git_projects\can_diagnostic_tool\data\signals.csv")
+BASE_DIR = Path(__file__).resolve().parent.parent
+DBC_PATH = BASE_DIR / "data" / "DBC_sample.dbc"
+OUTPUT_CSV = BASE_DIR / "data" / "signals.csv"
 # ────────────────────────────────────────────────────────────────────────────
 
 # ── REGEXES ─────────────────────────────────────────────────────────────────

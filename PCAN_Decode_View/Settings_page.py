@@ -55,9 +55,10 @@ class DummyBus:
         pass
 
 # -----------------------------------------------------------#
+BASE_DIR = Path(__file__).resolve().parent.parent
 def get_config_and_bus() -> Tuple[Dict[str, object], object]:
     settings = {
-        "DBC_PATH"    : Path(r"C:\Git_projects\can_diagnostic_tool\data\DBC_sample_cantools.dbc"),
+        "DBC_PATH"    : BASE_DIR / "data" / "DBC_sample_cantools.dbc",
         "PCAN_CHANNEL": "PCAN_USBBUS1",
         "BITRATE"     : 500_000,
         "USE_CAN_FD"  : False,

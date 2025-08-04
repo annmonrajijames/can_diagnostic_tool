@@ -14,9 +14,11 @@ import pandas as pd
 import re
 
 # ── USER PATHS ─────────────────────────────────────────────────────────────
-CSV_IN  = Path(r"C:\Git_projects\can_diagnostic_tool\data\signals_1.csv")
-DBC_DIR = Path(r"C:\Git_projects\can_diagnostic_tool\data")
-DBC_OUT = DBC_DIR / "standardized_full.dbc"
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+CSV_IN  = BASE_DIR / "data" / "signals.csv"
+DBC_DIR = BASE_DIR / "data"
+DBC_OUT = DBC_DIR / "DBC_sample_cantools.dbc"
 # ───────────────────────────────────────────────────────────────────────────
 
 # ── HELPERS ────────────────────────────────────────────────────────────────
