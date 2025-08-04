@@ -10,6 +10,7 @@ basic start-up sequence from `main.py`.
 
 import ctypes
 import sys
+import time
 from enum import Enum
 
 
@@ -232,6 +233,7 @@ def print_table(frames):
 # ---------------------------------------------------------------------------
 
 def main():
+    duration = float(sys.argv[1]) if len(sys.argv) > 1 else 5.0
     interface = CANInterface(baudrate=500000)
     try:
         interface.connect()
@@ -240,20 +242,23 @@ def main():
         sys.exit(1)
 
     unique_frames = {}
+    end_time = time.time() + duration
+    print(f"Collecting CAN frames for {duration:.1f} seconds...")
     try:
-        while True:
+        while time.time() < end_time:
             frame = interface.receive(timeout=10)
             if frame is None:
                 continue
             key = (frame.CAN_ID, tuple(frame.data))
             if key not in unique_frames:
                 unique_frames[key] = frame
-    except KeyboardInterrupt:
-        pass
     finally:
         interface.disconnect()
 
-    print_table(unique_frames.values())
+    if unique_frames:
+        print_table(unique_frames.values())
+    else:
+        print("No CAN frames captured.")
 
 
 if __name__ == "__main__":
