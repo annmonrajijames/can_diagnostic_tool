@@ -1,4 +1,4 @@
-import ctypes
+# sBus_J2534_Api.py
 from J2534_Driver import J2534API, CANFrame
 
 protocol = J2534API.Protocol_ID.CAN

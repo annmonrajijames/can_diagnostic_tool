@@ -1,7 +1,5 @@
 import ctypes
-import os
 from enum import Enum
-import winreg
 
 class CANFrame:
     def __init__(self):
