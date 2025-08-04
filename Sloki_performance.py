@@ -195,8 +195,15 @@ class CANInterface:
         self.api.SBusCanClearRxMsg()
 
     def disconnect(self):
-        self.api.SBusCanDisconnect()
-        self.api.SBusCanClose()
+        """Best-effort shutdown of the CAN channel and device."""
+        try:
+            self.api.SBusCanDisconnect()
+        except OSError as exc:  # pragma: no cover - depends on driver state
+            print(f"Warning: CAN channel disconnect failed: {exc}", file=sys.stderr)
+        try:
+            self.api.SBusCanClose()
+        except OSError as exc:  # pragma: no cover - depends on driver state
+            print(f"Warning: CAN device close failed: {exc}", file=sys.stderr)
 
     def transmit(self, can_id, data):
         frame = CANFrame()
