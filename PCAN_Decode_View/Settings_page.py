@@ -72,3 +72,20 @@ def get_config_and_bus() -> Tuple[Dict[str, object], object]:
 
     bus = DummyBus() if USE_DUMMY_BUS else _make_real_bus(settings)
     return settings, bus
+if __name__ == "__main__":
+    settings, bus = get_config_and_bus()
+    
+    print("Listening for 10 CAN messages...\n")
+    count = 0
+    while count < 10:
+        msg = bus.recv()
+        if msg is not None:
+            print(f"[{count+1}] SimpleMessage:")
+            print(f"  arbitration_id  : {hex(msg.arbitration_id)}")
+            print(f"  is_extended_id  : {msg.is_extended_id}")
+            print(f"  data            : {[hex(b) for b in msg.data]}")
+            print(f"  timestamp       : {msg.timestamp}")
+            print("-" * 40)
+            count += 1
+
+    bus.shutdown()

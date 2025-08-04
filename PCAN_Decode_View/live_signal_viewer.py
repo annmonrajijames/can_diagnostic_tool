@@ -8,7 +8,8 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton
 )
 
-from Settings_page import get_config_and_bus
+from Sloki_Settings_page import get_config_and_bus
+
 cfg, BUS = get_config_and_bus()
 
 dbc = cantools.database.load_file(cfg["DBC_PATH"])
