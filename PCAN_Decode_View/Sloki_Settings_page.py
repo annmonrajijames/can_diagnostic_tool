@@ -1,7 +1,8 @@
 """
 Sloki_Settings_page.py
 ----------------------
-Sloki J2534-backed bus that matches the PEAK Settings_page.py standard.
+Sloki J2534-backed bus that matches the PEAK Settings_page.py standard,
+but with timestamp in **milliseconds** so cycle-time (ms) is a simple delta.
 
 Public API:
     get_config_and_bus() -> (settings_dict, bus_like_object)
@@ -11,8 +12,11 @@ The returned `bus` provides:
     • send(arbitration_id, data, is_extended_id=False) -> int
     • shutdown()
 
-SimpleMessage matches PEAK version:
+SimpleMessage matches PEAK version by fields:
     arbitration_id • is_extended_id • data • timestamp
+
+Differences:
+    - timestamp is in **milliseconds** (float), not seconds.
 """
 
 from __future__ import annotations
@@ -26,7 +30,7 @@ import time
 # ── SimpleMessage (shared shape with PEAK version) ────────────
 SimpleMessage = namedtuple(
     "SimpleMessage",
-    ["arbitration_id", "is_extended_id", "data", "timestamp"]
+    ["arbitration_id", "is_extended_id", "data", "timestamp"]  # timestamp in **ms**
 )
 
 # ── J2534 / Sloki bindings ────────────────────────────────────
@@ -107,7 +111,7 @@ class J2534API:
 # ── High-level bus adapter (matches PEAK wrapper contract) ────
 class SlokiBus:
     """
-    recv() -> SimpleMessage(arbitration_id, is_extended_id, data, timestamp)
+    recv() -> SimpleMessage(arbitration_id, is_extended_id, data, timestamp_ms)
     send() -> status int
     shutdown()
     """
@@ -128,7 +132,8 @@ class SlokiBus:
 
         self.api.clear_filters()  # best-effort
 
-        self._t0_monotonic = time.monotonic()
+        # Base in **milliseconds** to keep units consistent
+        self._t0_ms = time.monotonic() * 1000.0
         self._force_extended = bool(force_extended)
 
         # Pre-compute ID type from DBC (optional)
@@ -195,10 +200,14 @@ class SlokiBus:
         dlc = max(0, int(m.DataSize) - 4)
         payload = bytes(m.Data[4:4+dlc])
         is_ext = self._resolve_is_extended(m, arb)
-        ts = self._t0_monotonic + (m.Timestamp / 1_000_000.0)
-        return SimpleMessage(arb, is_ext, payload, ts)
+
+        # Convert J2534 µs into **milliseconds**, then add ms base
+        ts_ms = self._t0_ms + (m.Timestamp / 1000.0)
+
+        return SimpleMessage(arb, is_ext, payload, ts_ms)
 
     def recv(self, timeout: Optional[float] = None) -> Optional[SimpleMessage]:
+        # timeout is given in seconds → convert to ms for J2534
         ms = 0 if timeout is None else max(0, int(timeout * 1000))
         status, msg = self.api.read_msg(ms)
         if status != 0 or msg is None:
@@ -238,13 +247,13 @@ def get_config_and_bus() -> Tuple[Dict, object]:
         "SLOKI_DLL"    : r"C:\Program Files (x86)\Sloki\SBUS\lib\x64\sBus-J2534.dll",
 
         # Behavior
-        "FORCE_EXTENDED"      : False,  # prefer flags/DBC
-        "DBC_ASSISTED_ID_TYPE": True,   # True → match PEAK behavior against your DBC
+        "FORCE_EXTENDED"       : False,  # prefer flags/DBC
+        "DBC_ASSISTED_ID_TYPE" : True,   # True → match PEAK behavior against your DBC
     }
     bus = _make_real_bus(settings)
     return settings, bus
 
-# ── Optional: tiny standalone smoke test (no verbose debug) ───
+# ── Optional: tiny standalone smoke test ──────────────────────
 if __name__ == "__main__":
     settings, bus = get_config_and_bus()
 
@@ -269,7 +278,7 @@ if __name__ == "__main__":
             print(f"  arbitration_id  : {hex(m.arbitration_id)}")
             print(f"  is_extended_id  : {m.is_extended_id}")
             print(f"  data            : {[hex(b) for b in m.data]}")
-            print(f"  timestamp       : {m.timestamp}")
+            print(f"  timestamp (ms)  : {m.timestamp}")
             print("----------------------------------------")
     except KeyboardInterrupt:
         pass
