@@ -1,15 +1,17 @@
 """
-Sloki_Settings_page.py  (J2534 + DBC-aware ID type resolution)
---------------------------------------------------------------
+Sloki_Settings_page.py
+----------------------
+Sloki J2534-backed bus that matches the PEAK Settings_page.py standard.
+
 Public API:
     get_config_and_bus() -> (settings_dict, bus_like_object)
 
-Bus methods:
-    recv(timeout) -> SimpleMessage | None
-    send(arbitration_id, data, is_extended_id=False) -> int
-    shutdown()
+The returned `bus` provides:
+    • recv(timeout)  -> SimpleMessage | None
+    • send(arbitration_id, data, is_extended_id=False) -> int
+    • shutdown()
 
-SimpleMessage:
+SimpleMessage matches PEAK version:
     arbitration_id • is_extended_id • data • timestamp
 """
 
@@ -21,28 +23,23 @@ from collections import namedtuple
 import ctypes
 import time
 
-# ──────────────────────────────────────────────────────────────
-# SimpleMessage (same shape as your PEAK Settings_page.py)
-# ──────────────────────────────────────────────────────────────
+# ── SimpleMessage (shared shape with PEAK version) ────────────
 SimpleMessage = namedtuple(
     "SimpleMessage",
     ["arbitration_id", "is_extended_id", "data", "timestamp"]
 )
 
-# ──────────────────────────────────────────────────────────────
-# J2534/Sloki low-level bindings
-# ──────────────────────────────────────────────────────────────
+# ── J2534 / Sloki bindings ────────────────────────────────────
 DWORD = ctypes.c_ulong
 ULONG = ctypes.c_ulong
 BYTE  = ctypes.c_ubyte
 
-# J2534 constants (subset)
-PROTO_CAN            = 0x00000005
-CAN_29BIT_ID         = 0x00000100   # bit 8 in RxStatus/TxFlags => 29-bit
-CAN_ID_BOTH          = 0x00000800   # Connect flag: accept 11-bit and 29-bit
-CLEAR_MSG_FILTERS    = 0x0000000A
+PROTO_CAN         = 0x00000005
+CAN_29BIT_ID      = 0x00000100   # flag bit for 29-bit frames
+CAN_ID_BOTH       = 0x00000800   # connect flag: accept 11-bit & 29-bit
+CLEAR_MSG_FILTERS = 0x0000000A
 
-MAX_BYTES = 4028  # Sloki buffer size used in your original code
+MAX_BYTES = 4028  # Sloki buffer size
 
 class PASS_THRU_MSG(ctypes.Structure):
     _fields_ = [
@@ -51,19 +48,17 @@ class PASS_THRU_MSG(ctypes.Structure):
         ("TxFlags",        ULONG),
         ("Timestamp",      ULONG),     # µs since connect
         ("DataSize",       ULONG),
-        ("ExtraDataIndex", ULONG),     # J2534 v04.04 field name/type
+        ("ExtraDataIndex", ULONG),     # J2534 v04.04 name/type
         ("Data",           BYTE * MAX_BYTES),
     ]
 
-
 class J2534API:
-    """Thin ctypes wrapper over Sloki's sBus-J2534.dll"""
+    """Thin ctypes wrapper for sBus-J2534.dll."""
     def __init__(self, dll_path: str):
         self.j2534 = ctypes.WinDLL(dll_path)
         self.device_id  = ULONG()
         self.channel_id = ULONG()
 
-        # safer marshalling
         self.j2534.PassThruOpen.argtypes      = [ctypes.c_void_p, ctypes.POINTER(ULONG)]
         self.j2534.PassThruOpen.restype       = ULONG
         self.j2534.PassThruConnect.argtypes   = [ULONG, ULONG, ULONG, ULONG, ctypes.POINTER(ULONG)]
@@ -109,14 +104,12 @@ class J2534API:
         num = ULONG(1)
         return int(self.j2534.PassThruWriteMsgs(self.channel_id, ctypes.byref(msg), ctypes.byref(num), timeout_ms))
 
-
-# ──────────────────────────────────────────────────────────────
-# High-level Bus-like adapter
-# ──────────────────────────────────────────────────────────────
+# ── High-level bus adapter (matches PEAK wrapper contract) ────
 class SlokiBus:
     """
-    Hardware-agnostic adapter.
-    recv() returns SimpleMessage(arbitration_id, is_extended_id, data, timestamp)
+    recv() -> SimpleMessage(arbitration_id, is_extended_id, data, timestamp)
+    send() -> status int
+    shutdown()
     """
 
     def __init__(self, dll_path: str, bitrate: int,
@@ -128,17 +121,17 @@ class SlokiBus:
         if st != 0:
             raise RuntimeError(f"PassThruOpen failed: {st}")
 
-        # Accept both 11-bit and 29-bit; some drivers set flags only with this.
+        # Accept both 11-bit and 29-bit IDs.
         st = self.api.connect(PROTO_CAN, CAN_ID_BOTH, bitrate)
         if st != 0:
             raise RuntimeError(f"PassThruConnect failed: {st}")
 
-        self.api.clear_filters()  # not fatal if it fails
+        self.api.clear_filters()  # best-effort
 
         self._t0_monotonic = time.monotonic()
         self._force_extended = bool(force_extended)
 
-        # Optional: DBC-assisted ID type resolution
+        # Pre-compute ID type from DBC (optional)
         self._dbc_assist = bool(enable_dbc_assist)
         self._dbc_std_ids: Set[int] = set()
         self._dbc_ext_ids: Set[int] = set()
@@ -151,11 +144,9 @@ class SlokiBus:
                         self._dbc_ext_ids.add(msg.frame_id & 0x1FFFFFFF)
                     else:
                         self._dbc_std_ids.add(msg.frame_id & 0x7FF)
-            except Exception as e:
-                # If DBC fails to load, just proceed without assist
-                self._dbc_assist = False
+            except Exception:
+                self._dbc_assist = False  # fall back gracefully
 
-    # ---- helpers ----
     @staticmethod
     def _pack_tx(arbitration_id: int, data: bytes | Sequence[int], is_extended_id: bool) -> PASS_THRU_MSG:
         if not isinstance(data, (bytes, bytearray)):
@@ -180,23 +171,23 @@ class SlokiBus:
         return msg
 
     def _resolve_is_extended(self, raw: PASS_THRU_MSG, arb: int) -> bool:
-        # 1) Flags first (preferred by spec)
-        flag_ext = bool(raw.RxStatus & CAN_29BIT_ID) or bool(raw.TxFlags & CAN_29BIT_ID)
-        if flag_ext or self._force_extended:
-            return True if (self._force_extended or flag_ext) else False
+        # 1) Spec flags first
+        if self._force_extended:
+            return True
+        if (raw.RxStatus & CAN_29BIT_ID) or (raw.TxFlags & CAN_29BIT_ID):
+            return True
 
-        # 2) DBC assist (if driver didn’t set flags)
+        # 2) DBC assist
         if self._dbc_assist:
-            # If this ID exists only as extended in DBC → True
             in_ext = (arb in self._dbc_ext_ids)
-            in_std = (arb & 0x7FF) in self._dbc_std_ids
+            in_std = ((arb & 0x7FF) in self._dbc_std_ids)
             if in_ext and not in_std:
                 return True
             if in_std and not in_ext:
                 return False
-            # If defined as both or in neither, fall through to heuristic.
+            # if both/neither, fall through
 
-        # 3) Heuristic fallback
+        # 3) Heuristic
         return bool(arb > 0x7FF)
 
     def _unpack_rx(self, m: PASS_THRU_MSG) -> SimpleMessage:
@@ -207,7 +198,6 @@ class SlokiBus:
         ts = self._t0_monotonic + (m.Timestamp / 1_000_000.0)
         return SimpleMessage(arb, is_ext, payload, ts)
 
-    # ---- public surface ----
     def recv(self, timeout: Optional[float] = None) -> Optional[SimpleMessage]:
         ms = 0 if timeout is None else max(0, int(timeout * 1000))
         status, msg = self.api.read_msg(ms)
@@ -225,10 +215,7 @@ class SlokiBus:
         finally:
             self.api.close()
 
-
-# ──────────────────────────────────────────────────────────────
-# Factory used by the rest of your app
-# ──────────────────────────────────────────────────────────────
+# ── Factory ───────────────────────────────────────────────────
 def _make_real_bus(settings) -> SlokiBus:
     return SlokiBus(
         dll_path=settings["SLOKI_DLL"],
@@ -240,83 +227,24 @@ def _make_real_bus(settings) -> SlokiBus:
 
 def get_config_and_bus() -> Tuple[Dict, object]:
     settings: Dict = {
+        # Keep same keys as PEAK version
         "DBC_PATH"     : Path(r"C:\Git_projects\can_diagnostic_tool\data\DBC_sample_cantools.dbc"),
         "PCAN_CHANNEL" : "PCAN_USBBUS1",
         "BITRATE"      : 500_000,
         "USE_CAN_FD"   : False,
         "DATA_PHASE"   : "500K/2M",
 
+        # Sloki-specific
         "SLOKI_DLL"    : r"C:\Program Files (x86)\Sloki\SBUS\lib\x64\sBus-J2534.dll",
 
-        # Keep False; ID type will come from flags, then DBC, then heuristic.
-        "FORCE_EXTENDED"     : False,
-        "DBC_ASSISTED_ID_TYPE": True,
-
-        # Debug
-        "DEBUG_DUMP_FIRST_N" : 30,
-        "DEBUG_SHOW_FLAGS"   : True,
-        "DEBUG_SHOW_SOURCE"  : True,   # show how ID type was resolved
+        # Behavior
+        "FORCE_EXTENDED"      : False,  # prefer flags/DBC
+        "DBC_ASSISTED_ID_TYPE": True,   # True → match PEAK behavior against your DBC
     }
     bus = _make_real_bus(settings)
     return settings, bus
 
-
-# ──────────────────────────────────────────────────────────────
-# Debug helpers
-# ──────────────────────────────────────────────────────────────
-def debug_print_first_n(bus: SlokiBus, n=20, timeout=0.05,
-                        show_flags=False, show_source=False):
-    print(f"\n[DEBUG] Dumping first {n} frames emitted by Sloki bus:\n")
-    i = 0
-    while i < n:
-        status, raw = bus.api.read_msg(int(timeout * 1000))
-        if status != 0 or raw is None:
-            continue
-
-        arb = ((raw.Data[0] << 24) | (raw.Data[1] << 16) | (raw.Data[2] << 8) | raw.Data[3]) & 0x1FFFFFFF
-        dlc = max(0, int(raw.DataSize) - 4)
-        payload = [hex(b) for b in raw.Data[4:4+dlc]]
-
-        # replicate the exact decision logic
-        flag_ext = bool(raw.RxStatus & CAN_29BIT_ID) or bool(raw.TxFlags & CAN_29BIT_ID)
-        if bus._force_extended:
-            is_ext = True
-            src = "force_extended"
-        elif flag_ext:
-            is_ext = True
-            src = "flags"
-        else:
-            src = "heuristic"
-            if bus._dbc_assist:
-                in_ext = (arb in bus._dbc_ext_ids)
-                in_std = ((arb & 0x7FF) in bus._dbc_std_ids)
-                if in_ext and not in_std:
-                    is_ext, src = True, "dbc"
-                elif in_std and not in_ext:
-                    is_ext, src = False, "dbc"
-                else:
-                    is_ext = bool(arb > 0x7FF)
-            else:
-                is_ext = bool(arb > 0x7FF)
-
-        ts = bus._t0_monotonic + (raw.Timestamp / 1_000_000.0)
-
-        i += 1
-        print(f"[{i}] SimpleMessage(")
-        print(f"     arbitration_id = {hex(arb)},")
-        print(f"     is_extended_id = {is_ext},")
-        print(f"     data           = {payload},")
-        print(f"     timestamp      = {ts}")
-        if show_flags:
-            print(f"     RxStatus=0x{raw.RxStatus:08X}, TxFlags=0x{raw.TxFlags:08X}")
-        if show_source:
-            print(f"     source={src}")
-        print(")")
-
-
-# ──────────────────────────────────────────────────────────────
-# Debug / Standalone run (mimics your PEAK printout style)
-# ──────────────────────────────────────────────────────────────
+# ── Optional: tiny standalone smoke test (no verbose debug) ───
 if __name__ == "__main__":
     settings, bus = get_config_and_bus()
 
@@ -327,28 +255,17 @@ if __name__ == "__main__":
     print(f"USE_CAN_FD   : {settings['USE_CAN_FD']}")
     print(f"DATA_PHASE   : {settings['DATA_PHASE']}")
     print("====================================\n")
-
     print("uptime library not available, timestamps are relative to boot time and not to Epoch UTC")
+    print("Listening for 10 CAN messages...\n")
 
-    to_dump = int(settings.get("DEBUG_DUMP_FIRST_N", 0))
-    if to_dump > 0:
-        debug_print_first_n(
-            bus,
-            n=to_dump,
-            timeout=0.05,
-            show_flags=settings.get("DEBUG_SHOW_FLAGS", False),
-            show_source=settings.get("DEBUG_SHOW_SOURCE", False),
-        )
-
-    print("\nListening for 10 CAN messages...\n")
-    count = 0
     try:
-        while count < 10:
-            m = bus.recv(timeout=0.05)  # 50 ms
+        cnt = 0
+        while cnt < 10:
+            m = bus.recv(timeout=0.05)
             if m is None:
                 continue
-            count += 1
-            print(f"[{count}] SimpleMessage:")
+            cnt += 1
+            print(f"[{cnt}] SimpleMessage:")
             print(f"  arbitration_id  : {hex(m.arbitration_id)}")
             print(f"  is_extended_id  : {m.is_extended_id}")
             print(f"  data            : {[hex(b) for b in m.data]}")
