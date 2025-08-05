@@ -85,6 +85,8 @@ def monitor(baudrate: int = 500000) -> None:
         raise RuntimeError("Failed to connect to Sloki device")
     api.clear_rx()
 
+    input("Press Enter to start the statistics")
+
     total = 0
     count = 0
     last_report = time.time()

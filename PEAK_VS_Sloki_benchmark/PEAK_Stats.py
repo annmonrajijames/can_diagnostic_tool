@@ -30,6 +30,7 @@ def monitor(channel: str = "PCAN_USBBUS1", bitrate: int = 500000) -> None:
     """
 
     bus = can.Bus(bustype="pcan", channel=channel, bitrate=bitrate)
+    input("Press Enter to start the statistics")
     total = 0
     count = 0
     last_report = time.time()
