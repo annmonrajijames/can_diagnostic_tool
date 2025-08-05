@@ -23,13 +23,15 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QTableWidget,
     QTableWidgetItem,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 
 @dataclass
 class _StatEntry:
     """Internal book keeping for :class:`CANStats`."""
-
     count: int = 0
     last_time: float | None = None
     cycle_time_ms: float = 0.0
@@ -99,18 +101,34 @@ class MainWindow(QMainWindow):
         self._stats = CANStats()
         self._payloads: Dict[int, bytes] = {}
 
+        # Layout
+        central_widget = QWidget()
+        layout = QVBoxLayout(central_widget)
+
+        # Table
         self._table = QTableWidget(0, 4, self)
         self._table.setHorizontalHeaderLabels(
             ["CAN ID", "Payload", "Cycle Time [ms]", "Count"]
         )
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.setCentralWidget(self._table)
 
+        # Restart Button
+        self._restart_button = QPushButton("Restart Counters")
+        self._restart_button.clicked.connect(self._reset_stats)
+
+        # Add widgets to layout
+        layout.addWidget(self._table)
+        layout.addWidget(self._restart_button)
+
+        self.setCentralWidget(central_widget)
+
+        # CAN Reader
         self._reader = CANReader()
         self._reader.frame_received.connect(self._process_frame)
         self._reader.start()
 
+        # Timer to refresh table
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
         self._timer.start(200)
@@ -119,8 +137,14 @@ class MainWindow(QMainWindow):
         self._reader.stop()
         super().closeEvent(event)
 
-    # ------------------------------------------------------------------
-    # helpers
+    # ---------------------- Helpers ----------------------
+
+    def _reset_stats(self) -> None:
+        """Clear all statistics and payloads, and reset the table."""
+        self._stats = CANStats()
+        self._payloads.clear()
+        self._table.setRowCount(0)
+
     def _process_frame(self, msg: can.Message) -> None:
         self._stats.update(msg.arbitration_id)
         self._payloads[msg.arbitration_id] = bytes(msg.data)
@@ -155,4 +179,3 @@ def main() -> int:  # pragma: no cover - entry point
 
 if __name__ == "__main__":  # pragma: no cover - module test
     raise SystemExit(main())
-
