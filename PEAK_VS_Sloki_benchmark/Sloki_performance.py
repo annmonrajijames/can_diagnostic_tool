@@ -18,6 +18,9 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QTableWidget,
     QTableWidgetItem,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
 
 
@@ -36,7 +39,6 @@ class CANStats:
         self._lock = Lock()
 
     def update(self, can_id: int) -> None:
-        """Record reception of *can_id* at the current time."""
         now = time.time()
         with self._lock:
             entry = self._stats.get(can_id)
@@ -50,13 +52,6 @@ class CANStats:
                 entry.count += 1
 
     def snapshot(self) -> Dict[int, Dict[str, float | int]]:
-        """Return a snapshot of the collected statistics.
-
-        The result maps CAN identifiers to dictionaries containing ``count`` and
-        ``cycle_time_ms`` entries.  The snapshot is safe to use without holding
-        the internal lock.
-        """
-
         with self._lock:
             return {
                 can_id: {
@@ -66,22 +61,22 @@ class CANStats:
                 for can_id, entry in self._stats.items()
             }
 
+    def reset(self) -> None:
+        with self._lock:
+            self._stats.clear()
+
 
 class CANFrame:
-    """Simple representation of a CAN frame."""
-
     def __init__(self) -> None:
         self.CAN_ID = 0
         self.DLC = 0
         self.data: list[int] = []
 
-    def __repr__(self) -> str:  # pragma: no cover - debug helper
+    def __repr__(self) -> str:
         return f"CANFrame(CAN_ID={self.CAN_ID}, DLC={self.DLC}, data={self.data})"
 
 
 class J2534API:
-    """Embedded minimal J2534 API binding for Sloki hardware."""
-
     class SMsg(ctypes.Structure):
         _fields_ = [
             ("ProtocolID", ctypes.c_ulong),
@@ -223,8 +218,6 @@ class J2534API:
 
 
 class CANReaderThread(QThread):
-    """Background thread that reads CAN frames and updates statistics."""
-
     def __init__(self, stats: CANStats, japi: J2534API, parent=None) -> None:
         super().__init__(parent)
         self._stats = stats
@@ -247,8 +240,6 @@ class CANReaderThread(QThread):
 
 
 class StatsWindow(QMainWindow):
-    """Main window displaying CAN statistics in a table."""
-
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("Sloki CAN Performance")
@@ -257,11 +248,23 @@ class StatsWindow(QMainWindow):
         self._japi = J2534API()
         self._reader = CANReaderThread(self._stats, self._japi)
 
-        self._table = QTableWidget(0, 3, self)
+        # Layout
+        central_widget = QWidget()
+        layout = QVBoxLayout()
+
+        self._table = QTableWidget(0, 3)
         self._table.setHorizontalHeaderLabels(["CAN ID", "Cycle Time (ms)", "Count"])
         self._table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         self._table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.setCentralWidget(self._table)
+
+        # Restart Button
+        restart_btn = QPushButton("Restart")
+        restart_btn.clicked.connect(self._restart_stats)
+
+        layout.addWidget(self._table)
+        layout.addWidget(restart_btn)
+        central_widget.setLayout(layout)
+        self.setCentralWidget(central_widget)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._refresh)
@@ -275,7 +278,7 @@ class StatsWindow(QMainWindow):
         for row, (can_id, info) in enumerate(sorted(data.items())):
             can_item = QTableWidgetItem(f"{can_id:08X}")
             cycle_item = QTableWidgetItem(f"{info['cycle_time_ms']:.2f}")
-            count_item = QTableWidgetItem(str(info['count']))
+            count_item = QTableWidgetItem(str(info["count"]))
             can_item.setTextAlignment(Qt.AlignCenter)
             cycle_item.setTextAlignment(Qt.AlignCenter)
             count_item.setTextAlignment(Qt.AlignCenter)
@@ -283,7 +286,12 @@ class StatsWindow(QMainWindow):
             self._table.setItem(row, 1, cycle_item)
             self._table.setItem(row, 2, count_item)
 
-    def closeEvent(self, event) -> None:  # type: ignore[override]
+    def _restart_stats(self) -> None:
+        self._stats.reset()
+        self._table.clearContents()
+        self._table.setRowCount(0)
+
+    def closeEvent(self, event) -> None:
         self._timer.stop()
         self._reader.stop()
         self._reader.wait()
@@ -301,4 +309,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
