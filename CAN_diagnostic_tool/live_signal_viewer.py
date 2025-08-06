@@ -1,3 +1,4 @@
+# live_signal_viewer.py
 import sys
 from typing import Dict
 
@@ -8,12 +9,12 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton
 )
 
-from Sloki_API import get_config_and_bus
+from PEAK_API import get_config_and_bus
+from dbc_page import dbc, DBC_PATH
 
 cfg, BUS = get_config_and_bus()
 
-dbc = cantools.database.load_file(cfg["DBC_PATH"])
-print(f"Loaded DBC: {cfg['DBC_PATH']}  (messages: {len(dbc.messages)})")
+print(f"Loaded DBC: {DBC_PATH}  (messages: {len(dbc.messages)})")
 
 def get_message(dbc_db, frame_id: int, is_ext: bool):
     lookup_id = frame_id | 0x8000_0000 if is_ext else frame_id
