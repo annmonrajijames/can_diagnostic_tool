@@ -1,5 +1,5 @@
 """
-Sloki_Settings_page.py
+Sloki_API.py
 ----------------------
 Sloki J2534-backed bus that matches the PEAK Settings_page.py standard,
 but with timestamp in **milliseconds** so cycle-time (ms) is a simple delta.

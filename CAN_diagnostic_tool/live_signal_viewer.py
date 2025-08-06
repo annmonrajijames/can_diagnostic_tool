@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget, QPushButton
 )
 
-from PEAK_Settings_page import get_config_and_bus
+from Sloki_API import get_config_and_bus
 
 cfg, BUS = get_config_and_bus()
 

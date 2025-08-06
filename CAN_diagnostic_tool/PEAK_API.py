@@ -1,5 +1,5 @@
 """
-Settings_page.py  –  one stop for hardware details.
+PEAK_API.py  –  one stop for hardware details.
 
 Exposes
     get_config_and_bus() -> (settings_dict, bus_like_object)
