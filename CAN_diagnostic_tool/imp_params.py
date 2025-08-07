@@ -1,6 +1,6 @@
 # imp_params.py
 """
-Live monitor for five signal groups:
+Live monitor with five signal groups:
 1. Important Parameters
 2. Battery Errors
 3. MCU Errors
@@ -24,7 +24,7 @@ from PEAK_API import get_config_and_bus
 from dbc_page  import dbc, DBC_PATH
 
 
-# ── Signal groups ────────────────────────────────────────────────────────────
+# ────────────────────────────── Signal groups ───────────────────────────────
 IMPORTANT_PARAMS = {
     "IgnitionStatus", "Brake_Pulse", "PackCurr", "PackVol",
     "chgStatus_chg_idle", "ChgFetStatus", "DchgFetStatus",
@@ -49,7 +49,7 @@ CLUSTER_ERRORS = {"Cluster_HeartBeat", "Mode_Ack"}
 
 CHARGER_ERRORS = {"ChgAuth", "ChgPeakProt"}
 
-# map every signal to its table key
+# Master lookup: signal → table key
 SIG_TO_GROUP = (
     {s: "important" for s in IMPORTANT_PARAMS} |
     {s: "battery"   for s in BATTERY_ERRORS}   |
@@ -59,15 +59,15 @@ SIG_TO_GROUP = (
 )
 
 
-# ── Helper: frame-id → cantools message ──────────────────────────────────────
+# ────────────────── Helper: frame-id → cantools message ─────────────────────
 def _get_message(db: cantools.database.Database, frame_id: int, is_ext: bool):
     lookup_id = frame_id | 0x8000_0000 if is_ext else frame_id
     return db._frame_id_to_message.get(lookup_id)
 
 
-# ── Background CAN reader thread ─────────────────────────────────────────────
+# ─────────────────────── Background CAN reader ──────────────────────────────
 class CanReader(QThread):
-    new_signal = Signal(str, float, str)       # sig_name, value, unit
+    new_signal = Signal(str, float, str)               # sig_name, value, unit
 
     def __init__(self, bus):
         super().__init__()
@@ -103,18 +103,18 @@ class CanReader(QThread):
         self.wait()
 
 
-# ── Reusable 3-column table widget ───────────────────────────────────────────
+# ────────────── Reusable 3-column table widget ──────────────────────────────
 class _SignalTable(QTableWidget):
     HEADERS = ["Signal", "Value", "Unit"]
 
     def __init__(self, signals: set[str]):
-        super().__init__(len(signals), len(self.HEADERS))
+        super().__init__(len(signals), len(self.HEADERS))   # rows, columns
         self.setHorizontalHeaderLabels(self.HEADERS)
         self.horizontalHeader().setStretchLastSection(True)
         self.verticalHeader().setVisible(False)
         self.setEditTriggers(QTableWidget.NoEditTriggers)
 
-        # fixed row order
+        # map signal → row index
         self._row_for: Dict[str, int] = {}
         for row, sig in enumerate(sorted(signals)):
             self._row_for[sig] = row
@@ -122,47 +122,54 @@ class _SignalTable(QTableWidget):
             item.setTextAlignment(Qt.AlignCenter)
             self.setItem(row, 0, item)
 
+    # Update cell values without re-inserting items
     def update_value(self, sig: str, value: float, unit: str):
         row = self._row_for[sig]
 
-        val_item = self.item(row, 1) or QTableWidgetItem()
-        val_item.setTextAlignment(Qt.AlignCenter)
-        self.setItem(row, 1, val_item)
+        # Value column
+        val_item = self.item(row, 1)
+        if val_item is None:
+            val_item = QTableWidgetItem()
+            val_item.setTextAlignment(Qt.AlignCenter)
+            self.setItem(row, 1, val_item)
         val_item.setText(str(value))
 
-        unit_item = self.item(row, 2) or QTableWidgetItem()
-        unit_item.setTextAlignment(Qt.AlignCenter)
-        self.setItem(row, 2, unit_item)
+        # Unit column
+        unit_item = self.item(row, 2)
+        if unit_item is None:
+            unit_item = QTableWidgetItem()
+            unit_item.setTextAlignment(Qt.AlignCenter)
+            self.setItem(row, 2, unit_item)
         unit_item.setText(unit)
 
 
-# ── Main window ──────────────────────────────────────────────────────────────
+# ─────────────────────────── Main window ────────────────────────────────────
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Live Monitor: Parameters & Error Flags")
-        self.resize(750, 800)
+        self.setWindowTitle("Live Monitor: Parameters & Errors")
+        self.resize(750, 820)
 
-        # tables
+        # Tables
         self._tbl_imp     = _SignalTable(IMPORTANT_PARAMS)
         self._tbl_batt    = _SignalTable(BATTERY_ERRORS)
         self._tbl_mcu     = _SignalTable(MCU_ERRORS)
         self._tbl_cluster = _SignalTable(CLUSTER_ERRORS)
         self._tbl_chg     = _SignalTable(CHARGER_ERRORS)
 
-        # group boxes
+        # Group boxes
         box_imp  = self._wrap("Important Parameters", self._tbl_imp)
         box_batt = self._wrap("Battery Errors",       self._tbl_batt)
         box_mcu  = self._wrap("MCU Errors",           self._tbl_mcu)
-        box_clu  = self._wrap("Cluster Errors",       self._tbl_cluster)
+        box_cls  = self._wrap("Cluster Errors",       self._tbl_cluster)
         box_chg  = self._wrap("Charger Errors",       self._tbl_chg)
 
-        # layout
+        # Layout
         layout = QVBoxLayout()
         layout.addWidget(box_imp)
         layout.addWidget(box_batt)
         layout.addWidget(box_mcu)
-        layout.addWidget(box_clu)
+        layout.addWidget(box_cls)
         layout.addWidget(box_chg)
         root = QWidget(); root.setLayout(layout)
         self.setCentralWidget(root)
@@ -181,16 +188,16 @@ class MainWindow(QMainWindow):
         box.setLayout(lay)
         return box
 
-    # route incoming updates to the correct table
+    # Route updates to the proper table
     def _dispatch_update(self, sig: str, value: float, unit: str):
-        table_key = SIG_TO_GROUP[sig]
-        if table_key == "important":
+        grp = SIG_TO_GROUP[sig]
+        if grp == "important":
             self._tbl_imp.update_value(sig, value, unit)
-        elif table_key == "battery":
+        elif grp == "battery":
             self._tbl_batt.update_value(sig, value, unit)
-        elif table_key == "mcu":
+        elif grp == "mcu":
             self._tbl_mcu.update_value(sig, value, unit)
-        elif table_key == "cluster":
+        elif grp == "cluster":
             self._tbl_cluster.update_value(sig, value, unit)
         else:  # charger
             self._tbl_chg.update_value(sig, value, unit)
@@ -200,7 +207,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 
-# ── Stand-alone run ──────────────────────────────────────────────────────────
+# ────────────────────────── Stand-alone run ─────────────────────────────────
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     win = MainWindow(); win.show()
