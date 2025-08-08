@@ -26,8 +26,9 @@ from typing import Dict, Tuple, Optional, Sequence, Set
 from collections import namedtuple
 import ctypes
 import time
-from dbc_page import dbc, DBC_PATH
+from dbc_page import load_dbc, DBC_PATH
 
+dbc = load_dbc()
 print(f"Loaded DBC: {DBC_PATH}  (messages: {len(dbc.messages)})")
 
 # ── SimpleMessage (shared shape with PEAK version) ────────────
