@@ -4,7 +4,7 @@ import sys
 from typing import Dict
 
 import cantools
-from PySide6.QtCore    import Qt, Signal, QThread
+from PySide6.QtCore    import Qt, Signal, QThread, QTimer
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel,
     QVBoxLayout, QHBoxLayout, QGridLayout,
@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from PEAK_API import get_config_and_bus
-from dbc_page  import dbc, DBC_PATH
+from dbc_page  import get_dbc, DBC_PATH
 
 
 # ─── Signal groups ──────────────────────────────────────────────────────────
@@ -53,13 +53,13 @@ def _msg(db, fid: int, ext: bool):
 
 class CanReader(QThread):
     new_val = Signal(str, float, str)          # sig, value, unit
-    def __init__(self, bus): super().__init__(); self.bus, self._run = bus, True
+    def __init__(self, bus, db): super().__init__(); self.bus, self.db, self._run = bus, db, True
     def run(self):
         try:
             while self._run:
                 m = self.bus.recv(0.1)
                 if not m: continue
-                d = _msg(dbc, m.arbitration_id, m.is_extended_id)
+                d = _msg(self.db, m.arbitration_id, m.is_extended_id)
                 if not d: continue
                 try:
                     dec = d.decode(m.data, allow_truncated=False, decode_choices=True)
@@ -123,14 +123,18 @@ class MainWindow(QMainWindow):
         scroll  = QScrollArea(); scroll.setWidgetResizable(True); scroll.setWidget(wrapper)
         self.setCentralWidget(scroll)
 
-        # CAN reader
+        # Defer heavy init (DBC parse + CAN bus) until after the window is shown
+        QTimer.singleShot(0, self._init_backend)
+
+    def _init_backend(self):
         _, bus = get_config_and_bus()
-        print(f"Loaded DBC: {DBC_PATH} (messages: {len(dbc.messages)})")
-        self._reader = CanReader(bus)
+        db = get_dbc()
+        print(f"Loaded DBC: {DBC_PATH} (messages: {len(db.messages)})")
+        self._reader = CanReader(bus, db)
         self._reader.new_val.connect(self._update); self._reader.start()
 
     def _update(self, s, v, u): self._widgets[SIG_TO_GROUP[s]].update(s, v, u)
-    def closeEvent(self, e): self._reader.stop(); super().closeEvent(e)
+    def closeEvent(self, e): self._reader.stop() if hasattr(self, "_reader") else None; super().closeEvent(e)
 
 
 # ─── Stand-alone run ────────────────────────────────────────────────────────
