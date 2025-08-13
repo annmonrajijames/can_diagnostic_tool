@@ -26,6 +26,9 @@ from typing import Dict, Tuple, Optional, Sequence, Set
 from collections import namedtuple
 import ctypes
 import time
+from dbc_page import dbc, DBC_PATH
+
+print(f"Loaded DBC: {DBC_PATH}  (messages: {len(dbc.messages)})")
 
 # ── SimpleMessage (shared shape with PEAK version) ────────────
 SimpleMessage = namedtuple(
@@ -238,7 +241,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 def get_config_and_bus() -> Tuple[Dict, object]:
     settings: Dict = {
         # Keep same keys as PEAK version
-        "DBC_PATH"    : BASE_DIR / "data" / "DBC_sample_cantools.dbc",
+        "DBC_PATH"    : DBC_PATH,
         "PCAN_CHANNEL" : "PCAN_USBBUS1",
         "BITRATE"      : 500_000,
         "USE_CAN_FD"   : False,
