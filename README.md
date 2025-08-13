@@ -98,3 +98,71 @@ can_diagnostic_tool/
 - cantools
 - pyqtgraph (for plotting)
 - pywin32 (for Windows GPS API)
+
+---
+
+## 🧩 Building the Windows .exe (PyInstaller)
+
+### Prerequisites
+- Install PEAK PCAN drivers for your device (Windows).
+- Place `PCANBasic.dll` in `CAN_diagnostic_tool/Released_version/` (same folder as `release_main.py`).
+- Ensure the release DBC file exists at `CAN_diagnostic_tool/Released_version/DBC_sample_cantools.dbc`.
+
+### Code changes that enable frozen builds
+- `CAN_diagnostic_tool/Released_version/PEAK_API.py`
+  - Preloads `PCANBasic.dll` on startup using `os.add_dll_directory` + `ctypes.WinDLL` so python-can's PCAN backend can initialize in frozen builds.
+  - Resolves the base directory correctly for PyInstaller (checks `sys._MEIPASS` and `sys.executable`).
+  - Wraps CAN bus initialization with a safe fallback to `DummyBus` and prints a clear error if hardware init fails.
+- `CAN_diagnostic_tool/Released_version/imp_params.py`
+  - Shows a warning dialog if running on `DummyBus` (no live data) and a critical error dialog if backend init fails.
+- `CAN_diagnostic_tool/Released_version/dbc_page.py`
+  - Resolves DBC path for both normal and frozen runs (checks `sys._MEIPASS` / exe dir). The DBC must be bundled next to the exe.
+
+### Option A: Build using the spec file
+From `CAN_diagnostic_tool/Released_version/` run:
+
+```powershell
+python -m PyInstaller --noconfirm CAN_Diagnostic_Tool.spec
+```
+
+The spec bundles:
+- `DBC_sample_cantools.dbc` as a data file.
+- `PCANBasic.dll` as a binary placed next to the exe.
+- Hidden imports for python-can’s PCAN backend.
+- Windowed build (no console window).
+
+Result: `CAN_diagnostic_tool/Released_version/dist/CAN_Diagnostic_Tool.exe`.
+
+### Option B: Build via CLI flags (no spec)
+From `CAN_diagnostic_tool/Released_version/` run:
+
+```powershell
+pyinstaller --noconfirm \
+  --name CAN_Diagnostic_Tool \
+  --add-data "DBC_sample_cantools.dbc;." \
+  --add-binary "PCANBasic.dll;." \
+  --hidden-import imp_params \
+  --hidden-import can \
+  --hidden-import can.interfaces \
+  --hidden-import can.interfaces.pcan \
+  --hidden-import can.interfaces.pcan.pcan \
+  --windowed \
+  release_main.py
+```
+
+Note: On Windows, `--add-data`/`--add-binary` use `src;dest` with a semicolon.
+
+### Verifying the build
+- Double-click the generated exe. The GUI should open quickly and start showing decoded signals if CAN is present.
+- If nothing appears and you want diagnostics, temporarily build with a console by adding `--console` (or setting `console=True` in the spec) and watch for:
+  - “PCANBasic preloaded: …”
+  - “Loaded DBC: … (messages: N)”
+  - Any error indicating the PCAN bus failed to init (app will fall back to DummyBus and show a warning).
+
+### Troubleshooting
+- No data in exe but works in source run:
+  - Ensure `PCANBasic.dll` is next to the exe (`dist` folder) and PEAK drivers are installed.
+  - Check `PCAN_CHANNEL` and `BITRATE` in `PEAK_API.py` match your hardware; enable CAN FD options if applicable.
+  - Confirm the DBC file name/path matches `dbc_page.py` config and is bundled.
+- Need logs without a console window:
+  - Add a file logger in `PEAK_API.py` or `imp_params.py` to capture initialization messages to a log file.

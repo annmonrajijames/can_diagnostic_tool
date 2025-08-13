@@ -8,7 +8,7 @@ from PySide6.QtCore    import Qt, Signal, QThread, QTimer
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QLabel,
     QVBoxLayout, QHBoxLayout, QGridLayout,
-    QGroupBox, QScrollArea
+    QGroupBox, QScrollArea, QMessageBox
 )
 
 from PEAK_API import get_config_and_bus
@@ -127,11 +127,19 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self._init_backend)
 
     def _init_backend(self):
-        _, bus = get_config_and_bus()
-        db = get_dbc()
-        print(f"Loaded DBC: {DBC_PATH} (messages: {len(db.messages)})")
-        self._reader = CanReader(bus, db)
-        self._reader.new_val.connect(self._update); self._reader.start()
+        try:
+            settings, bus = get_config_and_bus()
+            db = get_dbc()
+            print(f"Loaded DBC: {DBC_PATH} (messages: {len(db.messages)})")
+            if getattr(bus, 'IS_DUMMY', False):
+                QMessageBox.warning(self, "CAN Interface",
+                                    "Running without live CAN data (DummyBus).\n"
+                                    "Check PCAN drivers/DLL and channel settings.")
+            self._reader = CanReader(bus, db)
+            self._reader.new_val.connect(self._update); self._reader.start()
+        except Exception as e:
+            QMessageBox.critical(self, "Initialization Error",
+                                 f"Backend initialization failed:\n{type(e).__name__}: {e}")
 
     def _update(self, s, v, u): self._widgets[SIG_TO_GROUP[s]].update(s, v, u)
     def closeEvent(self, e): self._reader.stop() if hasattr(self, "_reader") else None; super().closeEvent(e)
