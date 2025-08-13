@@ -33,44 +33,60 @@ A powerful, vendor-independent **desktop-based GUI application** for working wit
 ## 📦 Project Structure
 ```text
 can_diagnostic_tool/
-├── main.py                       # Entry point
+├── CAN_diagnostic_tool/                     # General CAN diagnostic GUI
+│   ├── main.py                              # Entry point (general tool)
+│   ├── PEAK_API.py                          # PEAK hardware API wrapper
+│   ├── Sloki_API.py                         # Sloki hardware API wrapper
+│   ├── dbc_page.py
+│   ├── imp_params.py
+│   ├── live_signal_viewer.py
+│   └── Released_version/                    # Frozen release variant
+│       ├── release_main.py                  # Entry for released build
+│       ├── PEAK_API.py
+│       ├── dbc_page.py
+│       ├── imp_params.py
+│       └── DBC_sample_cantools.dbc
 │
-├── ui/                           # GUI layout & navigation
-│   ├── __init__.py
-│   └── main_window.py            # Home page + stacked pages
+├── CAN_tools/                               # Utilities and converters
+│   ├── cantools_compatible.py
+│   ├── Clean_dbcTOcsv.py
+│   ├── csvTostandardizedDBC.py
+│   ├── dbc_cantools_decoder.py
+│   ├── decode_signal_fun_validater.py
+│   └── PCAN_can_decoder.py
 │
-├── can_frame/                    # “CAN Frame” feature module
-│   ├── __init__.py
-│   ├── frame_page.py             # Live frame table & delay stats
-│   └── frame_controller.py       # (road‑map) decode / filter logic
+├── Only_Sloki_software/                     # Sloki‑only application
+│   ├── only_Sloki_main.py                   # Entry point (Sloki only)
+│   ├── config.json
+│   ├── can_frame/
+│   │   └── frame_page.py
+│   ├── hardware/
+│   │   ├── can_interface.py
+│   │   └── driver_loader.py
+│   ├── threads/
+│   │   └── receiver_thread.py
+│   └── ui/
+│       ├── __init__.py
+│       ├── hardware_page.py
+│       └── main_window.py
 │
-├── threads/                      # Background workers
-│   ├── receiver_thread.py        # Continuous CAN RX
-│   └── logger_thread.py          # (road‑map) CSV/Parquet logger
+├── BySlokiTeam_OriginalSampleCodes/            # Sloki team interface modules
+│   ├── sloki_one_code.py
+│   ├── sBus_J2534_Api.py
+│   └── J2534_Driver.py
 │
-├── hardware/                     # Interface abstraction
-│   ├── can_interface.py          # High‑level wrapper
-│   └── drivers/
-│       └── j2534_sloki_driver.py # Sloki J2534 DLL binding
+├── PEAK_VS_Sloki_benchmark/                 # Benchmark scripts
+│   ├── PEAK_EachCANID.py
+│   ├── PEAK_Stats.py
+│   ├── Sloki_EachCANID.py
+│   └── Sloki_Stats.py
 │
-├── core/                         # Backend utilities
-│   ├── dbc_decoder.py            # DBC parsing/decoding
-│   ├── logger.py                 # Re‑usable logging helpers
-│   ├── gps_location.py           # System‑time & optional GPS
-│   └── config.py                 # Centralised settings
-│
-├── data/
-│   ├── logs/                     # Recorded sessions
-│   └── sample.dbc                # Example database
-│
-├── assets/
-│   └── icons/                    # App icons / images
-│
-├── requirements.txt              # All Python dependencies
-├── .gitignore                    # Git hygiene rules
-└── README.md                     # ← **this file**
-
-```                 
+├── data/                                    # Datasets, logs, DBCs (user)
+│   ├── DBC_sample.dbc
+│   ├── DBC_sample_cantools.dbc
+│   └── signals.csv
+└── README.md
+```
 
 
 ---
