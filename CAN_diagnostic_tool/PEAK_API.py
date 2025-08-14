@@ -41,6 +41,14 @@ def _make_real_bus(settings):
                                  msg.is_extended_id,
                                  msg.data,
                                  msg.timestamp)
+        def send(self, arbitration_id: int, is_extended_id: bool, data: bytes):
+            message = can.Message(
+                arbitration_id=arbitration_id,
+                is_extended_id=is_extended_id,
+                data=bytes(data),
+                is_fd=settings["USE_CAN_FD"],
+            )
+            real_bus.send(message)
         def shutdown(self):
             real_bus.shutdown()
     return WrappedBus()
@@ -51,6 +59,9 @@ class DummyBus:
     def recv(self, timeout: float = 0.1):
         import time; time.sleep(timeout)
         return None
+    def send(self, arbitration_id: int, is_extended_id: bool, data: bytes):
+        # no-op in dummy mode
+        pass
     def shutdown(self):
         pass
 
