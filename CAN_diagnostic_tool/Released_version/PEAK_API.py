@@ -11,6 +11,9 @@ so the rest of the app never touches python-can directly.
 from pathlib import Path
 from typing import Dict, Tuple
 from collections import namedtuple
+import sys
+import os
+import ctypes
 
 # ---- user knob: run without hardware ----------------------
 USE_DUMMY_BUS = False           # True → GUI runs, but no real frames
@@ -22,7 +25,42 @@ SimpleMessage = namedtuple(
 )
 
 # -----------------------------------------------------------#
+def _resolve_base_dir() -> Path:
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+def _preload_pcanbasic_dll() -> None:
+    """Best-effort load of PCANBasic.dll from alongside the executable.
+
+    In a frozen .exe, python-can's PCAN backend relies on the DLL being in the
+    DLL search path. We try to add the folder and pre-load the DLL so subsequent
+    imports succeed. Fails silently if the DLL isn't present.
+    """
+    try:
+        base_dir = _resolve_base_dir()
+        dll_path = base_dir / "PCANBasic.dll"
+        if dll_path.exists():
+            try:
+                if hasattr(os, "add_dll_directory"):
+                    os.add_dll_directory(str(base_dir))
+                ctypes.WinDLL(str(dll_path))
+                print(f"PCANBasic preloaded: {dll_path}")
+            except OSError as e:
+                print(f"Warning: Failed to load PCANBasic.dll: {e}")
+        else:
+            # Not fatal here; the user may have it in system PATH already
+            print(f"PCANBasic.dll not found next to executable: {dll_path}")
+    except Exception as e:
+        print(f"Warning: PCANBasic preload error: {e}")
+
+
+# -----------------------------------------------------------#
 def _make_real_bus(settings):
+    _preload_pcanbasic_dll()
     import can                       # local import only here
     kwargs = dict(interface="pcan",
                   channel=settings["PCAN_CHANNEL"],
@@ -48,6 +86,7 @@ def _make_real_bus(settings):
 # -----------------------------------------------------------#
 class DummyBus:
     """Stand-in when hardware unavailable."""
+    IS_DUMMY = True
     def recv(self, timeout: float = 0.1):
         import time; time.sleep(timeout)
         return None
@@ -68,8 +107,17 @@ def get_config_and_bus() -> Tuple[Dict[str, object], object]:
         print(f"{k:13}: {v}")
     print("====================================\n")
 
-    bus = DummyBus() if USE_DUMMY_BUS else _make_real_bus(settings)
-    return settings, bus
+    if USE_DUMMY_BUS:
+        return settings, DummyBus()
+
+    try:
+        bus = _make_real_bus(settings)
+        return settings, bus
+    except Exception as e:
+        # Graceful fallback so the GUI still opens; surface the error via prints
+        print("ERROR: Failed to initialize PCAN bus. Falling back to DummyBus.")
+        print(f"       {type(e).__name__}: {e}")
+        return settings, DummyBus()
 if __name__ == "__main__":
     settings, bus = get_config_and_bus()
     
