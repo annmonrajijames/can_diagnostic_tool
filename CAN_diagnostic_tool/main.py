@@ -32,10 +32,14 @@ class HomeWindow(QMainWindow):
         self.params_btn = QPushButton("Important Parameters", clicked=self.open_params)
         self.params_btn.setFixedHeight(50)
 
+        self.tx_btn = QPushButton("Live Signal Transmit", clicked=self.open_transmit)
+        self.tx_btn.setFixedHeight(50)
+
         layout = QVBoxLayout()
         layout.addStretch()
         layout.addWidget(self.viewer_btn)
         layout.addWidget(self.params_btn)
+        layout.addWidget(self.tx_btn)
         layout.addStretch()
 
         root = QWidget(); root.setLayout(layout)
@@ -44,6 +48,7 @@ class HomeWindow(QMainWindow):
         # keep references so the windows aren’t garbage-collected
         self._viewer    = None    # type: ignore
         self._imp_param = None    # type: ignore
+        self._tx_window = None    # type: ignore
 
     # ── helpers ─────────────────────────────────────────────────────────────
     def _load_window(self, module_name: str, attr: str):
@@ -65,12 +70,21 @@ class HomeWindow(QMainWindow):
             self._imp_param.destroyed.connect(self._child_closed)
         self._imp_param.show(); self.hide()
 
+    def open_transmit(self):
+        if self._tx_window is None:
+            TxClass = self._load_window("live_signal_transmit", "MainWindow")
+            self._tx_window = TxClass()
+            self._tx_window.destroyed.connect(self._child_closed)
+        self._tx_window.show(); self.hide()
+
     def _child_closed(self):
         """Called when either child window is destroyed."""
         if self.sender() is self._viewer:
             self._viewer = None
         elif self.sender() is self._imp_param:
             self._imp_param = None
+        elif self.sender() is self._tx_window:
+            self._tx_window = None
         self.show()
 
 
