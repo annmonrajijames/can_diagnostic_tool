@@ -70,9 +70,12 @@ class MainWindow(QMainWindow):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
 
-        # Fill rows
+        # Fill rows and set up per-message state
         self._rows: List[RowWidgets] = []
         self._msg_values: Dict[int, Dict[str, float]] = {}  # key: frame_id -> {sig_name: value}
+        self._msg_group: Dict[int, List[RowWidgets]] = {}
+        # Per-message scheduler: frame_id -> {enabled, cycle_ms, next_due, mdef}
+        self._msg_sched: Dict[int, Dict[str, object]] = {}
         self._populate_rows()
 
         # Controls row
@@ -113,6 +116,13 @@ class MainWindow(QMainWindow):
         for m in dbc.messages:
             frame_id = m.frame_id
             self._msg_values.setdefault(frame_id, {})
+            self._msg_group.setdefault(frame_id, [])
+            self._msg_sched.setdefault(frame_id, {
+                "enabled": False,
+                "cycle_ms": 100,
+                "next_due": None,
+                "mdef": m,
+            })
             for sig in m.signals:
                 # Columns 0-2: Message ID, Message Name, Signal Name
                 msg_id_item = QTableWidgetItem(f"0x{frame_id:X}{' (EXT)' if m.is_extended_frame else ''}")
@@ -164,7 +174,10 @@ class MainWindow(QMainWindow):
                 self._wire_value_change(rw)
                 # Start/stop scheduling when checkbox toggled
                 enable_chk.toggled.connect(lambda checked, r=rw: self._on_enable_toggled(r, checked))
+                # Cycle time changed → take this row's cycle for the message
+                cyc_spin.valueChanged.connect(lambda _val, r=rw: self._on_cycle_changed(r))
                 self._rows.append(rw)
+                self._msg_group[frame_id].append(rw)
 
                 row_idx += 1
 
@@ -243,6 +256,7 @@ class MainWindow(QMainWindow):
         frame_id = rw.msg.frame_id
 
         def on_changed(val: float):
+            # Update value cache
             self._msg_values[frame_id][rw.sig.name] = float(val)
 
         spin.valueChanged.connect(on_changed)
@@ -251,48 +265,69 @@ class MainWindow(QMainWindow):
 
     # ---- actions ---------------------------------------------------------
     def _on_enable_toggled(self, rw: 'RowWidgets', checked: bool):
-        if checked:
-            now = time.monotonic()
-            rw.next_due = now  # transmit immediately on next tick
+        # Recompute message enabled if any row under same frame is enabled
+        frame_id = rw.msg.frame_id
+        group = self._msg_group.get(frame_id, [])
+        enabled = any(r.enable_chk.isChecked() for r in group)
+        sched = self._msg_sched[frame_id]
+        sched["enabled"] = enabled
+        if enabled:
+            sched["next_due"] = time.monotonic()  # send ASAP
         else:
-            rw.next_due = None
+            sched["next_due"] = None
+
+    def _on_cycle_changed(self, rw: 'RowWidgets'):
+        # Take this row's cycle for the message and reset schedule
+        self._set_msg_cycle_from_row(rw)
+
+    def _set_msg_cycle_from_row(self, rw: 'RowWidgets'):
+        frame_id = rw.msg.frame_id
+        sched = self._msg_sched[frame_id]
+        sched["cycle_ms"] = int(max(1, rw.cycle_spin.value()))
+        sched["next_due"] = time.monotonic()
 
     def _on_tick(self):
         if not self._rows:
             return
         now = time.monotonic()
-        # For rows that are due, send message with current values
-        for rw in self._rows:
-            if not rw.enable_chk.isChecked() or rw.next_due is None:
+        # For messages that are due, send once per message with merged values
+        for frame_id, sched in self._msg_sched.items():
+            if not sched["enabled"] or sched["next_due"] is None:
                 continue
-            if now + 1e-6 < rw.next_due:
+            if now + 1e-6 < sched["next_due"]:
                 continue
-            # Prepare values for the message: use cached map
-            frame_id = rw.msg.frame_id
+            mdef = sched["mdef"]
+            # Values: use cached map
             values = dict(self._msg_values.get(frame_id, {}))
-            # Ensure at least this signal has current value
-            values[rw.sig.name] = rw.get_value()
+            # Ensure cached reflects the current widgets state for enabled rows
+            for r in self._msg_group.get(frame_id, []):
+                if r.enable_chk.isChecked():
+                    values[r.sig.name] = r.get_value()
             try:
-                payload = rw.msg.encode(values)
-                BUS.send(rw.msg.frame_id, rw.msg.is_extended_frame, bytes(payload))
+                payload = mdef.encode(values)
+                BUS.send(mdef.frame_id, mdef.is_extended_frame, bytes(payload))
             except Exception as ex:
-                # Show once and disable to avoid spamming
-                QMessageBox.critical(self, "Transmit Error", f"Failed to send {rw.msg.name}/{rw.sig.name}:\n{ex}")
-                rw.enable_chk.setChecked(False)
-                rw.next_due = None
+                # Disable all rows for this message to avoid spamming
+                for r in self._msg_group.get(frame_id, []):
+                    r.enable_chk.setChecked(False)
+                sched["enabled"] = False
+                sched["next_due"] = None
+                QMessageBox.critical(self, "Transmit Error", f"Failed to send {mdef.name}:\n{ex}")
                 continue
-            # Increment count
-            try:
-                count = int(rw.count_item.text()) + 1
-            except ValueError:
-                count = 1
-            rw.count_item.setText(str(count))
+            # Increment count for enabled rows
+            for r in self._msg_group.get(frame_id, []):
+                if r.enable_chk.isChecked():
+                    try:
+                        count = int(r.count_item.text()) + 1
+                    except ValueError:
+                        count = 1
+                    r.count_item.setText(str(count))
             # Update status
             self._tx_total += 1
-            self.status_lbl.setText(f"Last TX: 0x{rw.msg.frame_id:X} {rw.msg.name}  len={len(payload)}  total={self._tx_total}")
+            self.status_lbl.setText(f"Last TX: 0x{mdef.frame_id:X} {mdef.name} len={len(payload)} total={self._tx_total}")
             # Schedule next
-            period_s = max(1, rw.cycle_spin.value()) / 1000.0
-            rw.next_due = now + period_s
+            period_s = max(1, int(sched["cycle_ms"])) / 1000.0
+            sched["next_due"] = now + period_s
 
     def _enable_all(self):
         for rw in self._rows:
