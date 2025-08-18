@@ -8,7 +8,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QPushButton, QGroupBox, QFormLayout, QRadioButton,
     QButtonGroup, QSlider, QDoubleSpinBox, QMessageBox, QScrollArea,
-    QTableWidget, QTableWidgetItem, QCheckBox, QSpinBox, QHeaderView
+    QTableWidget, QTableWidgetItem, QCheckBox, QSpinBox, QHeaderView, QLineEdit
 )
 
 from dbc_page import dbc
@@ -80,6 +80,16 @@ class MainWindow(QMainWindow):
 
         # Controls row
         controls = QHBoxLayout()
+        # Search bar for Signal Name
+        controls.addWidget(QLabel("Search Signal:"))
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Type to filter signal name…")
+        try:
+            self.search_edit.setClearButtonEnabled(True)
+        except Exception:
+            pass
+        self.search_edit.textChanged.connect(self._apply_signal_filter)
+        controls.addWidget(self.search_edit, 1)
         self.start_all_btn = QPushButton("Enable All")
         self.stop_all_btn = QPushButton("Disable All")
         self.clear_counts_btn = QPushButton("Clear Counts")
@@ -106,6 +116,9 @@ class MainWindow(QMainWindow):
         self._timer.timeout.connect(self._on_tick)
         self._timer.start()
         self._tx_total = 0
+
+        # Initialize filter to show all
+        self._apply_signal_filter("")
 
     # ---- UI builders ----------------------------------------------------
     def _populate_rows(self):
@@ -242,6 +255,18 @@ class MainWindow(QMainWindow):
         h.addWidget(spin)
         h.addStretch()
         return w, chk, spin
+
+    def _apply_signal_filter(self, text: str):
+        pattern = (text or "").strip().lower()
+        rc = self.table.rowCount()
+        if not pattern:
+            for r in range(rc):
+                self.table.setRowHidden(r, False)
+            return
+        for r in range(rc):
+            item = self.table.item(r, 2)  # Signal Name column
+            name = item.text().lower() if item is not None else ""
+            self.table.setRowHidden(r, pattern not in name)
 
     def _wire_value_change(self, rw: 'RowWidgets'):
         # Update cached message value whenever the spin changes
