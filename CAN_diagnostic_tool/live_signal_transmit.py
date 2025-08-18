@@ -45,6 +45,7 @@ class RowWidgets:
     # Compact holder for widgets and metadata per row
     msg: any
     sig: any
+    row_index: int
     value_widget: QWidget
     get_value: Callable[[], float]
     enable_chk: QCheckBox
@@ -90,6 +91,11 @@ class MainWindow(QMainWindow):
             pass
         self.search_edit.textChanged.connect(self._apply_signal_filter)
         controls.addWidget(self.search_edit, 1)
+        # Enabled-only filter
+        self.only_enabled_chk = QCheckBox("Show Enabled Signals")
+        self.only_enabled_chk.toggled.connect(self._apply_filters)
+        controls.addWidget(self.only_enabled_chk)
+        # Bulk buttons
         self.start_all_btn = QPushButton("Enable All")
         self.stop_all_btn = QPushButton("Disable All")
         self.clear_counts_btn = QPushButton("Clear Counts")
@@ -118,7 +124,7 @@ class MainWindow(QMainWindow):
         self._tx_total = 0
 
         # Initialize filter to show all
-        self._apply_signal_filter("")
+        self._apply_filters()
 
     # ---- UI builders ----------------------------------------------------
     def _populate_rows(self):
@@ -176,6 +182,7 @@ class MainWindow(QMainWindow):
                 rw = RowWidgets(
                     msg=m,
                     sig=sig,
+                    row_index=row_idx,
                     value_widget=value_widget,
                     get_value=getter,
                     enable_chk=enable_chk,
@@ -256,17 +263,28 @@ class MainWindow(QMainWindow):
         h.addStretch()
         return w, chk, spin
 
-    def _apply_signal_filter(self, text: str):
-        pattern = (text or "").strip().lower()
+    def _apply_signal_filter(self, _text: str):
+        # Back-compat slot; use unified filters
+        self._apply_filters()
+
+    def _apply_filters(self):
+        pattern = (self.search_edit.text() or "").strip().lower()
+        only_enabled = self.only_enabled_chk.isChecked()
         rc = self.table.rowCount()
-        if not pattern:
-            for r in range(rc):
-                self.table.setRowHidden(r, False)
-            return
         for r in range(rc):
+            # search filter
             item = self.table.item(r, 2)  # Signal Name column
             name = item.text().lower() if item is not None else ""
-            self.table.setRowHidden(r, pattern not in name)
+            matches = (pattern in name) if pattern else True
+            # enabled filter
+            enabled_ok = True
+            if only_enabled:
+                if 0 <= r < len(self._rows):
+                    enabled_ok = self._rows[r].enable_chk.isChecked()
+                else:
+                    enabled_ok = False
+            visible = matches and enabled_ok
+            self.table.setRowHidden(r, not visible)
 
     def _wire_value_change(self, rw: 'RowWidgets'):
         # Update cached message value whenever the spin changes
