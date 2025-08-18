@@ -1,12 +1,14 @@
 import sys
+import time
 from dataclasses import dataclass
-from typing import Callable, Dict, Optional, Tuple
+from typing import Callable, Dict, Optional, Tuple, List
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QComboBox, QPushButton, QGroupBox, QFormLayout, QRadioButton,
-    QButtonGroup, QSlider, QDoubleSpinBox, QMessageBox, QScrollArea
+    QButtonGroup, QSlider, QDoubleSpinBox, QMessageBox, QScrollArea,
+    QTableWidget, QTableWidgetItem, QCheckBox, QSpinBox, QHeaderView
 )
 
 from dbc_page import dbc
@@ -39,117 +41,166 @@ def _decimals_for_step(step: float) -> int:
 
 
 @dataclass
-class SignalEditor:
-    name: str
-    widget: QWidget
+class RowWidgets:
+    # Compact holder for widgets and metadata per row
+    msg: any
+    sig: any
+    value_widget: QWidget
     get_value: Callable[[], float]
+    enable_chk: QCheckBox
+    cycle_spin: QSpinBox
+    count_item: QTableWidgetItem
+    next_due: Optional[float] = None
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Live Signal Transmit")
-        self.resize(1100, 700)
+        self.resize(1200, 720)
 
-        # Top: message selector and info
-        top_row = QHBoxLayout()
-        top_row.addWidget(QLabel("Message:"))
-        self.msg_combo = QComboBox()
-        for m in dbc.messages:
-            self.msg_combo.addItem(m.name)
-        self.msg_combo.currentIndexChanged.connect(self._on_message_changed)
-        top_row.addWidget(self.msg_combo, 1)
+        # Table with all signals across all messages
+        self.table = QTableWidget()
+        self.table.setColumnCount(7)
+        self.table.setHorizontalHeaderLabels([
+            "Message ID", "Message Name", "Signal Name", "Value", "Unit", "Cycle time(ms)", "Count"
+        ])
+        self.table.verticalHeader().setVisible(False)
+        self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
 
-        self.msg_id_label = QLabel("")
-        top_row.addWidget(self.msg_id_label)
+        # Fill rows
+        self._rows: List[RowWidgets] = []
+        self._msg_values: Dict[int, Dict[str, float]] = {}  # key: frame_id -> {sig_name: value}
+        self._populate_rows()
 
-        self.transmit_btn = QPushButton("Transmit")
-        self.transmit_btn.clicked.connect(self._transmit_once)
-        top_row.addWidget(self.transmit_btn)
+        # Controls row
+        controls = QHBoxLayout()
+        self.start_all_btn = QPushButton("Enable All")
+        self.stop_all_btn = QPushButton("Disable All")
+        self.clear_counts_btn = QPushButton("Clear Counts")
+        controls.addWidget(self.start_all_btn)
+        controls.addWidget(self.stop_all_btn)
+        controls.addWidget(self.clear_counts_btn)
+        controls.addStretch()
+        self.status_lbl = QLabel("")
+        controls.addWidget(self.status_lbl)
+        self.start_all_btn.clicked.connect(self._enable_all)
+        self.stop_all_btn.clicked.connect(self._disable_all)
+        self.clear_counts_btn.clicked.connect(self._clear_counts)
 
-        # Center: dynamic signal editors inside a scroll area
-        self.form = QFormLayout()
-        self.form_group = QGroupBox("Signals")
-        self.form_group.setLayout(self.form)
-        scroll = QScrollArea(); scroll.setWidgetResizable(True)
-        container = QWidget(); v = QVBoxLayout(); v.addWidget(self.form_group); v.addStretch(); container.setLayout(v)
-        scroll.setWidget(container)
-
+        # Layout
         root_layout = QVBoxLayout()
-        root_layout.addLayout(top_row)
-        root_layout.addWidget(scroll)
+        root_layout.addLayout(controls)
+        root_layout.addWidget(self.table)
         root = QWidget(); root.setLayout(root_layout)
         self.setCentralWidget(root)
 
-        self._signal_editors: Dict[str, SignalEditor] = {}
-        self._on_message_changed()
+        # Timer for periodic transmission
+        self._timer = QTimer(self)
+        self._timer.setInterval(20)  # 50 Hz tick
+        self._timer.timeout.connect(self._on_tick)
+        self._timer.start()
+        self._tx_total = 0
 
     # ---- UI builders ----------------------------------------------------
-    def _clear_form(self):
-        while self.form.rowCount():
-            self.form.removeRow(0)
-        self._signal_editors.clear()
+    def _populate_rows(self):
+        # Count all signals
+        total_signals = sum(len(m.signals) for m in dbc.messages)
+        self.table.setRowCount(total_signals)
+        row_idx = 0
+        for m in dbc.messages:
+            frame_id = m.frame_id
+            self._msg_values.setdefault(frame_id, {})
+            for sig in m.signals:
+                # Columns 0-2: Message ID, Message Name, Signal Name
+                msg_id_item = QTableWidgetItem(f"0x{frame_id:X}{' (EXT)' if m.is_extended_frame else ''}")
+                msg_id_item.setFlags(msg_id_item.flags() ^ Qt.ItemIsEditable)
+                self.table.setItem(row_idx, 0, msg_id_item)
 
-    def _on_message_changed(self):
-        self._clear_form()
-        mdef = self._current_message()
-        if mdef is None:
-            return
-        frame_id = mdef.frame_id
-        self.msg_id_label.setText(f"ID: 0x{frame_id:X} {'(EXT)' if mdef.is_extended_frame else ''}")
+                msg_name_item = QTableWidgetItem(m.name)
+                msg_name_item.setFlags(msg_name_item.flags() ^ Qt.ItemIsEditable)
+                self.table.setItem(row_idx, 1, msg_name_item)
 
-        for sig in mdef.signals:
-            editor = self._create_signal_editor(sig)
-            self._signal_editors[editor.name] = editor
-            self.form.addRow(QLabel(f"{sig.name} ({sig.length}b)"), editor.widget)
+                sig_name_item = QTableWidgetItem(sig.name)
+                sig_name_item.setFlags(sig_name_item.flags() ^ Qt.ItemIsEditable)
+                self.table.setItem(row_idx, 2, sig_name_item)
 
-    def _create_signal_editor(self, sig) -> SignalEditor:
-        # 1-bit → radio buttons (0/1)
-        if sig.length == 1 and ((sig.scale == 1 and (sig.minimum, sig.maximum) == (0, 1)) or (sig.minimum is None and sig.maximum is None)):
-            row = QWidget(); h = QHBoxLayout(); row.setLayout(h)
-            zero = QRadioButton("0"); one = QRadioButton("1")
-            zero.setChecked(True)
-            group = QButtonGroup(row); group.addButton(zero, 0); group.addButton(one, 1)
-            h.addWidget(zero); h.addWidget(one); h.addStretch()
-            return SignalEditor(sig.name, row, lambda g=group: float(g.checkedId()))
+                # Column 3: Value editor (slider + spinbox compact)
+                value_widget, getter, initial_val = self._create_value_editor(sig)
+                self.table.setCellWidget(row_idx, 3, value_widget)
+                # Save initial
+                self._msg_values[frame_id][sig.name] = initial_val
 
-        # General numeric → slider + spinbox
+                # Column 4: Unit
+                unit_txt = sig.unit or ""
+                unit_item = QTableWidgetItem(str(unit_txt))
+                unit_item.setFlags(unit_item.flags() ^ Qt.ItemIsEditable)
+                self.table.setItem(row_idx, 4, unit_item)
+
+                # Column 5: Cycle time + enable checkbox
+                cyc_widget, enable_chk, cyc_spin = self._create_cycle_widget()
+                self.table.setCellWidget(row_idx, 5, cyc_widget)
+
+                # Column 6: Count
+                count_item = QTableWidgetItem("0")
+                count_item.setTextAlignment(Qt.AlignCenter)
+                count_item.setFlags(count_item.flags() ^ Qt.ItemIsEditable)
+                self.table.setItem(row_idx, 6, count_item)
+
+                # Track row
+                rw = RowWidgets(
+                    msg=m,
+                    sig=sig,
+                    value_widget=value_widget,
+                    get_value=getter,
+                    enable_chk=enable_chk,
+                    cycle_spin=cyc_spin,
+                    count_item=count_item,
+                    next_due=None,
+                )
+                # Keep message values in sync when control changes
+                self._wire_value_change(rw)
+                # Start/stop scheduling when checkbox toggled
+                enable_chk.toggled.connect(lambda checked, r=rw: self._on_enable_toggled(r, checked))
+                self._rows.append(rw)
+
+                row_idx += 1
+
+        # Resize for readability
+        self.table.resizeColumnsToContents()
+        self.table.horizontalHeader().setStretchLastSection(True)
+
+    def _create_value_editor(self, sig):
+        # Build compact value editor (slider + spinbox)
         scale = float(sig.scale or 1.0)
         offset = float(sig.offset or 0.0)
         pmin, pmax = _compute_physical_bounds(sig.length, sig.is_signed, scale, offset, sig.minimum, sig.maximum)
         if pmin == pmax:
-            pmax = pmin + scale
+            pmax = pmin + max(scale, 1.0)
         step = abs(scale) if scale != 0 else 1.0
         decimals = min(6, max(0, _decimals_for_step(step)))
 
-        row = QWidget(); h = QHBoxLayout(); row.setLayout(h)
-        slider = QSlider(Qt.Horizontal)
-        spin = QDoubleSpinBox(); spin.setDecimals(decimals)
-        spin.setRange(pmin, pmax)
-        spin.setSingleStep(step)
+        row = QWidget(); h = QHBoxLayout(); h.setContentsMargins(4, 0, 4, 0); h.setSpacing(6); row.setLayout(h)
+        slider = QSlider(Qt.Horizontal); slider.setFixedHeight(18)
+        spin = QDoubleSpinBox(); spin.setDecimals(decimals); spin.setRange(pmin, pmax); spin.setSingleStep(step)
 
-        # Map slider positions to physical range with up to 1000 steps
         total_steps_exact = int(round((pmax - pmin) / step))
         slider_steps = max(1, min(1000, total_steps_exact))
         slider.setRange(0, slider_steps)
 
         def slider_to_phys(pos: int) -> float:
-            if slider_steps == 0:
-                return pmin
-            ratio = pos / slider_steps
+            ratio = pos / slider_steps if slider_steps else 0
             val = pmin + ratio * (pmax - pmin)
-            # snap to resolution
             snapped = round((val - pmin) / step) * step + pmin
             return max(pmin, min(pmax, snapped))
 
         def phys_to_slider(val: float) -> int:
-            val = max(pmin, min(pmax, val))
-            if pmax == pmin:
-                return 0
-            ratio = (val - pmin) / (pmax - pmin)
+            v = max(pmin, min(pmax, val))
+            ratio = 0 if pmax == pmin else (v - pmin) / (pmax - pmin)
             return int(round(ratio * slider_steps))
 
-        # sync both directions
         def on_slider_changed(pos: int):
             spin.blockSignals(True)
             spin.setValue(slider_to_phys(pos))
@@ -163,43 +214,97 @@ class MainWindow(QMainWindow):
         slider.valueChanged.connect(on_slider_changed)
         spin.valueChanged.connect(on_spin_changed)
 
-        # initial
+        # initial value = pmin
         on_spin_changed(pmin)
 
         h.addWidget(slider, 2)
         h.addWidget(spin, 1)
+        return row, (lambda s=spin: float(s.value())), float(pmin)
 
-        return SignalEditor(sig.name, row, lambda s=spin: float(s.value()))
+    def _create_cycle_widget(self):
+        w = QWidget(); h = QHBoxLayout(); h.setContentsMargins(6, 0, 6, 0); h.setSpacing(6); w.setLayout(h)
+        chk = QCheckBox("Enable")
+        spin = QSpinBox(); spin.setRange(1, 60000); spin.setSuffix(" ms"); spin.setValue(100)
+        h.addWidget(chk)
+        h.addWidget(spin)
+        h.addStretch()
+        return w, chk, spin
+
+    def _wire_value_change(self, rw: 'RowWidgets'):
+        # Update cached message value whenever the spin changes
+        # Locate the QDoubleSpinBox inside value_widget
+        spin: Optional[QDoubleSpinBox] = None
+        for child in rw.value_widget.findChildren(QDoubleSpinBox):
+            spin = child
+            break
+        if spin is None:
+            return
+
+        frame_id = rw.msg.frame_id
+
+        def on_changed(val: float):
+            self._msg_values[frame_id][rw.sig.name] = float(val)
+
+        spin.valueChanged.connect(on_changed)
+        # Set initial cached value
+        self._msg_values[frame_id][rw.sig.name] = rw.get_value()
 
     # ---- actions ---------------------------------------------------------
-    def _current_message(self):
-        idx = self.msg_combo.currentIndex()
-        if idx < 0:
-            return None
-        return dbc.messages[idx]
+    def _on_enable_toggled(self, rw: 'RowWidgets', checked: bool):
+        if checked:
+            now = time.monotonic()
+            rw.next_due = now  # transmit immediately on next tick
+        else:
+            rw.next_due = None
 
-    def _transmit_once(self):
-        mdef = self._current_message()
-        if mdef is None:
+    def _on_tick(self):
+        if not self._rows:
             return
-        values: Dict[str, float] = {}
-        for name, editor in self._signal_editors.items():
+        now = time.monotonic()
+        # For rows that are due, send message with current values
+        for rw in self._rows:
+            if not rw.enable_chk.isChecked() or rw.next_due is None:
+                continue
+            if now + 1e-6 < rw.next_due:
+                continue
+            # Prepare values for the message: use cached map
+            frame_id = rw.msg.frame_id
+            values = dict(self._msg_values.get(frame_id, {}))
+            # Ensure at least this signal has current value
+            values[rw.sig.name] = rw.get_value()
             try:
-                values[name] = editor.get_value()
+                payload = rw.msg.encode(values)
+                BUS.send(rw.msg.frame_id, rw.msg.is_extended_frame, bytes(payload))
             except Exception as ex:
-                QMessageBox.warning(self, "Input Error", f"Failed to read value for {name}: {ex}")
-                return
-        try:
-            payload = mdef.encode(values)
-        except Exception as ex:
-            QMessageBox.critical(self, "Encode Error", f"Failed to encode message:\n{ex}")
-            return
-        try:
-            BUS.send(mdef.frame_id, mdef.is_extended_frame, bytes(payload))
-        except Exception as ex:
-            QMessageBox.critical(self, "Transmit Error", f"Hardware send failed:\n{ex}")
-            return
-        QMessageBox.information(self, "Transmit", "Message sent.")
+                # Show once and disable to avoid spamming
+                QMessageBox.critical(self, "Transmit Error", f"Failed to send {rw.msg.name}/{rw.sig.name}:\n{ex}")
+                rw.enable_chk.setChecked(False)
+                rw.next_due = None
+                continue
+            # Increment count
+            try:
+                count = int(rw.count_item.text()) + 1
+            except ValueError:
+                count = 1
+            rw.count_item.setText(str(count))
+            # Update status
+            self._tx_total += 1
+            self.status_lbl.setText(f"Last TX: 0x{rw.msg.frame_id:X} {rw.msg.name}  len={len(payload)}  total={self._tx_total}")
+            # Schedule next
+            period_s = max(1, rw.cycle_spin.value()) / 1000.0
+            rw.next_due = now + period_s
+
+    def _enable_all(self):
+        for rw in self._rows:
+            rw.enable_chk.setChecked(True)
+
+    def _disable_all(self):
+        for rw in self._rows:
+            rw.enable_chk.setChecked(False)
+
+    def _clear_counts(self):
+        for rw in self._rows:
+            rw.count_item.setText("0")
 
 
 def main():
