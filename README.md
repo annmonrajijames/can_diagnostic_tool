@@ -34,25 +34,31 @@ A powerful, vendor-independent **desktop-based GUI application** for working wit
 ```text
 can_diagnostic_tool/
 ├── README.md
+├── .vscode/
+│   └── settings.json                        # Workspace settings
+│
 ├── BySlokiTeam_OriginalSampleCodes/         # Sloki team sample/interface modules
 │   ├── J2534_Driver.py
 │   ├── sBus_J2534_Api.py
 │   └── sloki_one_code.py
 │
-├── CAN_diagnostic_tool/                     # General CAN diagnostic GUI
+├── CAN_diagnostic_tool_for_Engineers/       # Engineer-focused GUI (dev/test tools)
 │   ├── dbc_page.py
 │   ├── imp_params.py
 │   ├── live_signal_transmit.py
 │   ├── live_signal_viewer.py
-│   ├── main.py                              # Entry point (general tool)
+│   ├── main.py                              # Entry point for engineers
 │   ├── PEAK_API.py                          # PEAK hardware API wrapper
 │   ├── Sloki_API.py                         # Sloki hardware API wrapper
-│   ├── Released_version/                    # Frozen release variant
-│   │   ├── dbc_page.py
-│   │   ├── imp_params.py
-│   │   ├── PCANBasic.dll                    # PEAK driver DLL (usually git-ignored)
-│   │   ├── PEAK_API.py
-│   │   └── release_main.py                  # Entry for released build
+│   └── __pycache__/
+│
+├── CAN_diagnostic_tool_for_Users/           # User-facing packaged variant
+│   ├── dbc_page.py
+│   ├── DBC_sample_cantools.dbc
+│   ├── imp_params.py
+│   ├── main_users.py                        # Entry point for end users
+│   ├── PCANBasic.dll                        # PEAK driver DLL (Windows)
+│   ├── PEAK_API.py
 │   └── __pycache__/
 │
 ├── CAN_tools/                               # Utilities and converters
