@@ -26,7 +26,7 @@ from typing import Dict, Tuple, Optional, Sequence, Set
 from collections import namedtuple
 import ctypes
 import time
-from dbc_page import dbc, DBC_PATH
+from dbc_decode_input import dbc, DBC_PATH
 
 print(f"Loaded DBC: {DBC_PATH}  (messages: {len(dbc.messages)})")
 

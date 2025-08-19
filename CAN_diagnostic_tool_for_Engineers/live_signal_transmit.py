@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QCheckBox, QSpinBox, QHeaderView, QLineEdit
 )
 
-from dbc_page import dbc
+from dbc_decode_input import dbc
 from PEAK_API import get_config_and_bus
 
 

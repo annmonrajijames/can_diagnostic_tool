@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 )
 
 from PEAK_API import get_config_and_bus
-from dbc_page  import dbc, DBC_PATH
+from dbc_decode_input import dbc, DBC_PATH
 
 
 # ─── Signal groups ──────────────────────────────────────────────────────────
