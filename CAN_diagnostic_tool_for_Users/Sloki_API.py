@@ -26,6 +26,7 @@ from typing import Dict, Tuple, Optional, Sequence, Set
 from collections import namedtuple
 import ctypes
 import time
+import sys
 
 
 # ── SimpleMessage (shared shape with PEAK version) ────────────
@@ -244,7 +245,17 @@ def _make_real_bus(settings) -> SlokiBus:
     prefer_extended_small_ids=settings.get("PREFER_EXTENDED_SMALL_IDS", True),
     )
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+def _resolve_base_dir() -> Path:
+    # PyInstaller one-file: temporary extraction dir
+    if hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)
+    # PyInstaller one-dir: executable directory
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    # Normal interpreter: alongside this file
+    return Path(__file__).resolve().parent
+
+BASE_DIR = _resolve_base_dir()
 def get_config_and_bus() -> Tuple[Dict, object]:
     settings: Dict = {
         # Keep same keys as PEAK version
@@ -254,8 +265,8 @@ def get_config_and_bus() -> Tuple[Dict, object]:
         "USE_CAN_FD"   : False,
         "DATA_PHASE"   : "500K/2M",
 
-        # Sloki-specific
-        "SLOKI_DLL"    : r"C:\Program Files (x86)\Sloki\SBUS\lib\x64\sBus-J2534.dll",
+    # Sloki-specific
+    "SLOKI_DLL"    : str((BASE_DIR / "sBus-J2534.dll")),
 
         # Behavior
         "FORCE_EXTENDED"       : False,  # prefer flags/DBC
