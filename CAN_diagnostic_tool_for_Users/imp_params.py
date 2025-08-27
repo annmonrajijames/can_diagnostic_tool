@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QGroupBox, QScrollArea, QMessageBox
 )
 
-from PEAK_API import get_config_and_bus
+from Sloki_API import get_config_and_bus
 from dbc_page  import get_dbc, DBC_PATH
 
 
