@@ -120,7 +120,8 @@ class SlokiBus:
     def __init__(self, dll_path: str, bitrate: int,
                  force_extended: bool = False,
                  dbc_path: Optional[Path] = None,
-                 enable_dbc_assist: bool = True):
+                 enable_dbc_assist: bool = True,
+                 prefer_extended_small_ids: bool = True):
         self.api = J2534API(dll_path)
         st = self.api.open()
         if st != 0:
@@ -136,6 +137,7 @@ class SlokiBus:
         # Base in **milliseconds** to keep units consistent
         self._t0_ms = time.monotonic() * 1000.0
         self._force_extended = bool(force_extended)
+        self._prefer_ext_small = bool(prefer_extended_small_ids)
 
         # Pre-compute ID type from DBC (optional)
         self._dbc_assist = bool(enable_dbc_assist)
@@ -193,7 +195,13 @@ class SlokiBus:
                 return False
             # if both/neither, fall through
 
-        # 3) Heuristic
+        # 3) Ambiguity preference without DBC: treat small numeric IDs as extended.
+        #    This fixes setups where the adapter doesn't set the 29-bit flag
+        #    for IDs like 0x6, 0x9, etc., which are extended in the DBC.
+        if self._prefer_ext_small and arb <= 0x7FF:
+            return True
+
+        # 4) Heuristic
         return bool(arb > 0x7FF)
 
     def _unpack_rx(self, m: PASS_THRU_MSG) -> SimpleMessage:
@@ -233,6 +241,7 @@ def _make_real_bus(settings) -> SlokiBus:
         force_extended=settings.get("FORCE_EXTENDED", False),
         dbc_path=settings.get("DBC_PATH"),
         enable_dbc_assist=settings.get("DBC_ASSISTED_ID_TYPE", True),
+    prefer_extended_small_ids=settings.get("PREFER_EXTENDED_SMALL_IDS", True),
     )
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -251,6 +260,7 @@ def get_config_and_bus() -> Tuple[Dict, object]:
         # Behavior
         "FORCE_EXTENDED"       : False,  # prefer flags/DBC
         "DBC_ASSISTED_ID_TYPE" : True,   # True → match PEAK behavior against your DBC
+    "PREFER_EXTENDED_SMALL_IDS": True, # If flags are missing, prefer extended for small IDs (6,9,...)
     }
     bus = _make_real_bus(settings)
     return settings, bus
