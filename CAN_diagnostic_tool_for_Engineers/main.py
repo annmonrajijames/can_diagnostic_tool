@@ -4,7 +4,8 @@ Home page launcher for the CAN Diagnostic GUI.
 
 Buttons:
 • Live Signal Viewer   → opens live_signal_viewer.MainWindow
-• Important Parameters → opens imp_params.MainWindow
+• Live Signal Transmit → opens live_signal_transmit.MainWindow
+• Settings             → opens Settings.MainWindow
 
 Only one child window is visible at a time; when it closes, control
 returns to the home page.
@@ -31,9 +32,6 @@ class HomeWindow(QMainWindow):
         self.viewer_btn = QPushButton("Live Signal Viewer", clicked=self.open_viewer)
         self.viewer_btn.setFixedHeight(50)
 
-        self.params_btn = QPushButton("Important Parameters", clicked=self.open_params)
-        self.params_btn.setFixedHeight(50)
-
         self.tx_btn = QPushButton("Live Signal Transmit", clicked=self.open_transmit)
         self.tx_btn.setFixedHeight(50)
 
@@ -43,7 +41,6 @@ class HomeWindow(QMainWindow):
         layout = QVBoxLayout()
         layout.addStretch()
         layout.addWidget(self.viewer_btn)
-        layout.addWidget(self.params_btn)
         layout.addWidget(self.tx_btn)
         layout.addWidget(self.settings_btn)
         layout.addStretch()
@@ -72,14 +69,6 @@ class HomeWindow(QMainWindow):
             self._viewer.destroyed.connect(self._child_closed)
         self._viewer.show(); self.hide()
 
-    def open_params(self):
-        if self._imp_param is None or not isValid(self._imp_param):
-            ParamClass = self._load_window("imp_params", "MainWindow")
-            self._imp_param = ParamClass()
-            self._imp_param.setAttribute(Qt.WA_DeleteOnClose, True)
-            self._imp_param.destroyed.connect(self._child_closed)
-        self._imp_param.show(); self.hide()
-
     def open_transmit(self):
         if self._tx_window is None or not isValid(self._tx_window):
             TxClass = self._load_window("live_signal_transmit", "MainWindow")
@@ -101,8 +90,6 @@ class HomeWindow(QMainWindow):
         s = self.sender()
         if s is self._viewer:
             self._viewer = None
-        elif s is self._imp_param:
-            self._imp_param = None
         elif s is self._tx_window:
             self._tx_window = None
         elif s is self._settings:
