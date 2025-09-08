@@ -1,23 +1,23 @@
 #!/usr/bin/env python3
 """
 csselectronicsDBC_to_cantoolsDBC.py – Clean a CSS Electronics/Vector-style DBC
-and produce a cantools-compatible DBC in one pass.
+and produce a cantools-compatible DBC in one pass (no intermediate CSV file).
 
-Pipeline:
-  1) Parse input .dbc into a normalized CSV (UTF-8 with BOM) with columns:
-     msg_id,msg_name,frame_type,dlc,msg_comment,
-     sig_name,mode,start,length,byte_order,is_signed,
-     scale,offset,min,max,unit,sig_comment
-  2) Read that CSV and generate a standard-compliant DBC that cantools can load.
+Pipeline (in-memory):
+    1) Parse input .dbc into a normalized list of records with columns:
+         msg_id,msg_name,frame_type,dlc,msg_comment,
+         sig_name,mode,start,length,byte_order,is_signed,
+         scale,offset,min,max,unit,sig_comment
+    2) Use those records directly to generate a standard-compliant DBC that
+         cantools can load.
 
 Notes:
-  • Message IDs in the CSV are PCAN-style hex strings with 0x prefix (e.g. 0x123, 0x18F20309).
-  • Extended/standard frame type is auto-corrected: if id > 0x7FF → extended.
-  • No external libraries required.
+    • Message IDs are PCAN-style hex strings with 0x prefix (e.g. 0x123, 0x18F20309).
+    • Extended/standard frame type is auto-corrected: if id > 0x7FF → extended.
+    • No external libraries required.
 
 Usage:
-  python csselectronicsDBC_to_cantoolsDBC.py -i data/DBC_sample.dbc -o data/DBC_sample_cantools.dbc \
-      --csv data/signals.csv
+    python csselectronicsDBC_to_cantoolsDBC.py -i data/DBC_sample.dbc -o data/DBC_sample_cantools.dbc
 
 If arguments are omitted, defaults under the repository's data/ folder are used.
 """
@@ -25,7 +25,6 @@ If arguments are omitted, defaults under the repository's data/ folder are used.
 from __future__ import annotations
 
 import argparse
-import csv
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -35,7 +34,6 @@ from typing import Dict, Iterable, List, Tuple
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_IN_DBC = BASE_DIR / "data" / "DBC_sample.dbc"
 DEFAULT_OUT_DBC = BASE_DIR / "data" / "DBC_sample_cantools.dbc"
-DEFAULT_OUT_CSV = BASE_DIR / "data" / "signals.csv"
 
 # ── REGEXES re-used from the cleaning step ─────────────────────────────────
 _bo_re = re.compile(r'^BO_\s*(\d+)\s+(\S+)\s*:\s*(\d+)\s+(.+)$')
@@ -118,18 +116,18 @@ def parse_dbc_to_rows(path: Path, msg_comments: Dict[int, str], sig_comments: Di
     return rows
 
 # ── STEP 3: WRITE CSV (UTF-8 with BOM) ─────────────────────────────────────
-def write_csv_rows(rows: List[List[str]], out_path: Path) -> None:
+def make_records(rows: List[List[str]]) -> List[dict]:
+    """Convert list-of-lists from parser to list-of-dicts using the canonical header."""
     header = [
         'msg_id','msg_name','frame_type','dlc','msg_comment',
         'sig_name','mode','start','length','byte_order','is_signed',
         'scale','offset','min','max','unit','sig_comment'
     ]
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    with out_path.open('w', newline='', encoding='utf-8-sig') as fo:
-        writer = csv.writer(fo)
-        writer.writerow(header)
-        writer.writerows(rows)
-    print(f"✅ Wrote {len(rows)} signals → {out_path}")
+    records: List[dict] = []
+    for r in rows:
+        rec = {k: v for k, v in zip(header, r)}
+        records.append(rec)
+    return records
 
 # ── CSV → DBC HELPERS ─────────────────────────────────────────────────────
 def vector_bits(start: int, length: int, byte_order: str) -> List[int]:
@@ -161,11 +159,7 @@ def to_bool(val) -> bool:
     return s not in ('', 'none', 'nan')
 
 # ── STEP 4: CSV → cantools-compatible DBC ──────────────────────────────────
-def csv_to_dbc(csv_path: Path, dbc_out: Path) -> None:
-    # Read CSV preserving header
-    with csv_path.open('r', encoding='utf-8-sig', newline='') as fi:
-        reader = csv.DictReader(fi)
-        records = list(reader)
+def rows_to_dbc(records: List[dict], dbc_out: Path) -> None:
 
     # Conflict check within same multiplex context
     alloc: Dict[str, Dict[str, set]] = defaultdict(lambda: defaultdict(set))
@@ -283,26 +277,25 @@ def csv_to_dbc(csv_path: Path, dbc_out: Path) -> None:
     print(f"✅  Wrote complete DBC with {sum(len(v) for v in grouped.values())} signals → {dbc_out}")
 
 # ── ORCHESTRATION ──────────────────────────────────────────────────────────
-def run_pipeline(in_dbc: Path, out_csv: Path, out_dbc: Path) -> None:
+def run_pipeline(in_dbc: Path, out_dbc: Path) -> None:
     if not in_dbc.exists():
         raise FileNotFoundError(in_dbc)
     print(f"➡️  Reading DBC: {in_dbc}")
 
     msg_cmt, sig_cmt = collect_comments(in_dbc)
     rows = parse_dbc_to_rows(in_dbc, msg_cmt, sig_cmt)
-    write_csv_rows(rows, out_csv)
+    records = make_records(rows)
 
-    print(f"➡️  Converting CSV → cantools DBC: {out_csv} → {out_dbc}")
-    csv_to_dbc(out_csv, out_dbc)
+    print(f"➡️  Converting parsed records → cantools DBC: {out_dbc}")
+    rows_to_dbc(records, out_dbc)
 
 # ── CLI ────────────────────────────────────────────────────────────────────
 def parse_args(argv: Iterable[str] | None = None):
-    p = argparse.ArgumentParser(description="Convert CSS Electronics/Vector DBC to cantools-compatible DBC via a cleaned CSV")
+    p = argparse.ArgumentParser(description="Convert CSS Electronics/Vector DBC to a cantools-compatible DBC (no intermediate CSV)")
     p.add_argument('-i', '--in', dest='in_dbc', type=Path, default=DEFAULT_IN_DBC, help='Input DBC file path')
     p.add_argument('-o', '--out', dest='out_dbc', type=Path, default=DEFAULT_OUT_DBC, help='Output cantools-compatible DBC file path')
-    p.add_argument('--csv', dest='out_csv', type=Path, default=DEFAULT_OUT_CSV, help='Intermediate CSV path (will be overwritten)')
     return p.parse_args(argv)
 
 if __name__ == '__main__':
     args = parse_args()
-    run_pipeline(args.in_dbc, args.out_csv, args.out_dbc)
+    run_pipeline(args.in_dbc, args.out_dbc)
