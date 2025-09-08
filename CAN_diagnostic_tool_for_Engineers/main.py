@@ -5,6 +5,7 @@ Home page launcher for the CAN Diagnostic GUI.
 Buttons:
 • Live Signal Viewer   → opens live_signal_viewer.MainWindow
 • Live Signal Transmit → opens live_signal_transmit.MainWindow
+• DBC Converter and Tools → opens dbc_converter_tools.MainWindow
 • Settings             → opens Settings.MainWindow
 
 Only one child window is visible at a time; when it closes, control
@@ -28,20 +29,21 @@ class HomeWindow(QMainWindow):
         self.setWindowTitle("CAN Diagnostic Tool – Home")
         self.resize(400, 280)
 
-        # ── UI ───────────────────────────────────────────────────────────────
+        # UI
         self.viewer_btn = QPushButton("Live Signal Viewer", clicked=self.open_viewer)
         self.viewer_btn.setFixedHeight(50)
-
         self.tx_btn = QPushButton("Live Signal Transmit", clicked=self.open_transmit)
         self.tx_btn.setFixedHeight(50)
-
         self.settings_btn = QPushButton("Settings", clicked=self.open_settings)
         self.settings_btn.setFixedHeight(40)
+        self.dbc_tools_btn = QPushButton("DBC Converter and Tools", clicked=self.open_dbc_tools)
+        self.dbc_tools_btn.setFixedHeight(50)
 
         layout = QVBoxLayout()
         layout.addStretch()
         layout.addWidget(self.viewer_btn)
         layout.addWidget(self.tx_btn)
+        layout.addWidget(self.dbc_tools_btn)
         layout.addWidget(self.settings_btn)
         layout.addStretch()
 
@@ -50,10 +52,11 @@ class HomeWindow(QMainWindow):
         self.setCentralWidget(root)
 
         # keep references so the windows aren’t garbage-collected
-        self._viewer    = None    # type: ignore
-        self._imp_param = None    # type: ignore
-        self._tx_window = None    # type: ignore
-        self._settings  = None    # type: ignore
+        self._viewer = None
+        self._imp_param = None
+        self._tx_window = None
+        self._settings = None
+        self._dbc_tools = None
 
     # ── helpers ─────────────────────────────────────────────────────────────
     def _load_window(self, module_name: str, attr: str):
@@ -85,6 +88,14 @@ class HomeWindow(QMainWindow):
             self._settings.destroyed.connect(self._child_closed)
         self._settings.show(); self.hide()
 
+    def open_dbc_tools(self):
+        if self._dbc_tools is None or not isValid(self._dbc_tools):
+            DbcToolsClass = self._load_window("dbc_converter_tools", "MainWindow")
+            self._dbc_tools = DbcToolsClass()
+            self._dbc_tools.setAttribute(Qt.WA_DeleteOnClose, True)
+            self._dbc_tools.destroyed.connect(self._child_closed)
+        self._dbc_tools.show(); self.hide()
+
     def _child_closed(self):
         """Called when either child window is destroyed."""
         s = self.sender()
@@ -94,6 +105,8 @@ class HomeWindow(QMainWindow):
             self._tx_window = None
         elif s is self._settings:
             self._settings = None
+        elif s is self._dbc_tools:
+            self._dbc_tools = None
         self.show()
 
 
