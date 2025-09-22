@@ -10,10 +10,17 @@ Behavior:
 """
 
 from pathlib import Path
+import sys
 import json
 import cantools
 
-APP_DIR = Path(__file__).resolve().parent
+def _resolve_app_dir() -> Path:
+    # Use the folder next to the executable when frozen, else module folder
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+APP_DIR = _resolve_app_dir()
 BASE_DIR = APP_DIR.parent
 SETTINGS_PATH = APP_DIR / "settings.json"
 
@@ -38,8 +45,9 @@ def get_dbc_path() -> Path | None:
 
 def get_dbc():
     global _dbc_cache, DBC_PATH
+    # Always refresh DBC_PATH from settings for each process start
+    DBC_PATH = get_dbc_path()
     if _dbc_cache is None:
-        DBC_PATH = get_dbc_path()
         if not DBC_PATH or not Path(DBC_PATH).exists():
             raise FileNotFoundError(
                 "DBC file not configured. Open Settings and select a .dbc file."

@@ -1,6 +1,7 @@
 # Settings.py
 from __future__ import annotations
 import json
+import sys
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -8,8 +9,18 @@ from PySide6.QtWidgets import (
     QFileDialog, QHBoxLayout, QVBoxLayout, QMessageBox
 )
 
-# Local config path (inside Engineers app folder)
-APP_DIR = Path(__file__).resolve().parent
+def _resolve_app_dir() -> Path:
+    """Return folder for app-local config.
+
+    - Frozen (PyInstaller one-dir/one-file): use parent of sys.executable
+    - Dev: use folder of this file
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+# Local config path (next to the EXE when frozen)
+APP_DIR = _resolve_app_dir()
 CONFIG_PATH = APP_DIR / "settings.json"
 
 # No predefined DBC defaults here; selection and fallback are handled in dbc_decode_input.py

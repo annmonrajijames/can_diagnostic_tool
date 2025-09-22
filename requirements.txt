@@ -1,0 +1,5 @@
+# Minimal dependencies to build/run the Engineers app and create an .exe
+pyinstaller>=6.0
+PySide6>=6.6
+python-can>=4.3
+cantools>=39.4

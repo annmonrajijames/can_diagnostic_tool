@@ -1,0 +1,21 @@
+{
+  // VS Code task to build the Engineers EXE with console
+  "$schema": "https://json.schemastore.org/tasks.json",
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build Engineers EXE (console)",
+      "type": "shell",
+      "command": "python",
+      "args": [
+        "-m", "PyInstaller",
+        "--noconfirm",
+        "PEAK_Engineers_Tool.spec"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/PEAK_CAN_diagnostic_tool_for_Engineers"
+      },
+      "problemMatcher": []
+    }
+  ]
+}
